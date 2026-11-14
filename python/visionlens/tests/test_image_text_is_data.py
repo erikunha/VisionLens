@@ -116,6 +116,21 @@ def test_the_decoder_reads_the_orientation_and_nothing_else(tmp_path: Path):
     assert INJECTION not in repr(decoded)
 
 
+def test_the_decoder_drops_the_text_of_the_file_it_read(tmp_path: Path):
+    # Pillow attaches the metadata of the file to the picture it decodes,
+    # so the text of the file would ride along with the pixels. The
+    # decoder drops it: the picture that leaves the decoder carries pixels
+    # only.
+    service = DecodeService(tmp_path)
+    path = tmp_path / "with-text.jpg"
+    _write_jpeg(path, INJECTION)
+
+    decoded = service.decode(path)
+
+    assert INJECTION not in str(decoded.image.info)
+    assert "exif" not in decoded.image.info
+
+
 def test_the_decoder_refuses_an_image_whose_text_is_the_only_thing_it_carries(
     tmp_path: Path,
 ):

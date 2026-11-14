@@ -372,6 +372,15 @@ class DecodeService:
                 + ((exc.strerror or exc.__class__.__name__) if isinstance(exc, OSError) else str(exc))
             ) from exc
         width, height = decoded.size
+        # The TEXT of the file (the EXIF strings, the JPEG comment, the PNG
+        # text chunks) is dropped here. The decoder extracts no text, and
+        # the picture that leaves it carries pixels only: a future reader
+        # that serialized the metadata of the picture would otherwise carry
+        # an instruction of the file into the platform.
+        try:
+            decoded.info.clear()
+        except AttributeError:  # pragma: no cover - a picture with no info
+            pass
         return DecodedImage(
             path=path,
             mime_type=mime_type,
