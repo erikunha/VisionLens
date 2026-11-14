@@ -397,7 +397,7 @@ nothing.
 cd python/visionlens
 python3 -m pytest tests -q    # package tests
 uv lock                       # refresh the development lock (exact pins, exclude-newer cutoff)
-uv run --group dev mypy src/visionlens   # type check, zero errors
+uv run --group dev --extra vision mypy src/visionlens   # type check, zero errors
 uv build                      # build the wheel and the sdist
 python3 scripts/release_gate.py          # the release gate
 ```

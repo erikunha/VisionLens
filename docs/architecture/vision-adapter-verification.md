@@ -189,8 +189,8 @@ artifact of each one is the console output quoted above or the file it names.
 
 | Gate | Command | Exit |
 |---|---|---|
-| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (424 passed) |
-| Python types | `cd python/visionlens && uv run --group dev mypy src/visionlens` | 0 (36 files, no issues) |
+| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (424 passed with the `vision` extra installed; the CI runs it without the extra and reports 423 passed and 1 skipped) |
+| Python types | `cd python/visionlens && uv run --group dev --extra vision mypy src/visionlens` | 0 (36 files, no issues) |
 | Node suite | `pnpm exec vitest run` | 0 (111 files, 1302 passed, 3 skipped) |
 | Lint | `pnpm run lint` | 0 |
 | Type check | `pnpm run typecheck` | 0 (9 of 9 tasks) |
