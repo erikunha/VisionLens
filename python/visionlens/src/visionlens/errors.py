@@ -100,8 +100,10 @@ class LibraryErrorCode(str, enum.Enum):
     IMAGE_METADATA_UNREADABLE = "IMAGE_METADATA_UNREADABLE"
     MIME_MISMATCH = "MIME_MISMATCH"
     MODEL_RUN_FAILED = "MODEL_RUN_FAILED"
+    NON_NUMERIC_PIXEL = "NON_NUMERIC_PIXEL"
     PATH_NOT_FOUND = "PATH_NOT_FOUND"
     PATH_OUTSIDE_ROOT = "PATH_OUTSIDE_ROOT"
+    NETWORK_ACCESS_REFUSED = "NETWORK_ACCESS_REFUSED"
     RESOURCE_EXHAUSTED = "RESOURCE_EXHAUSTED"
     UNSUPPORTED_DEVICE = "UNSUPPORTED_DEVICE"
     UNSUPPORTED_FILE_TYPE = "UNSUPPORTED_FILE_TYPE"
@@ -185,6 +187,31 @@ class ResourceExhaustedError(LibraryError):
 
     def __init__(self, message: str) -> None:
         super().__init__(LibraryErrorCode.RESOURCE_EXHAUSTED, message)
+
+
+class NetworkAccessRefusedError(LibraryError):
+    """The worker reached for the network without being allowed to.
+
+    The worker of an isolated inference runs with the network disabled
+    unless provider access is explicitly required
+    (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`).
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.NETWORK_ACCESS_REFUSED, message)
+
+
+class NonNumericPixelError(LibraryError):
+    """A value that is not a pixel reached the input of the model.
+
+    The text of an image is DATA and never an instruction
+    (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`), so the input
+    of the model accepts numbers only: a string that reaches this boundary
+    is refused instead of being read as something to obey.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.NON_NUMERIC_PIXEL, message)
 
 
 class PathNotFoundError(LibraryError):

@@ -210,6 +210,50 @@ proves it (`python/visionlens/tests/test_protocol.py:29`) still passes. The CPU 
 reference path, and the recorded run of the adapter is a CPU run
 (`docs/architecture/vision-adapter.md`).
 
+## Amendment 2026-11-14: the worker runs with the network disabled
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The pack asks the worker of an isolated inference to run with the network DISABLED unless
+provider access is explicitly required, and it asks that the text of an image be treated as data
+and never as agent instruction
+(`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`). A worker that can reach the network can
+be turned into a client of anything that answers, and a file that carries an instruction in its
+metadata must never be able to say what the platform does.
+
+**What changes.** There is one guard of the network, and it is a property of the PROCESS rather
+than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
+
+- the guard patches the socket layer while it is installed and restores it when it is removed, so
+  it covers the threads that serve the requests and not only the thread that installed it;
+- two gates stand between the worker and the network. The MODE of the worker: provider access has
+  to be explicitly required for this worker, and the default says it was not
+  (`python/visionlens/src/visionlens/worker.py:43`). The SCOPE: even a worker that requires
+  provider access reaches the network only inside an explicit allowance, and only for as long as
+  the scope lasts;
+- the loader of the weights opens that scope around its fetch
+  (`python/visionlens/src/visionlens/encoders/weights.py:719`), and the scope is a request and
+  not a permission: a worker that did not require provider access refuses the fetch even though
+  the loader asked for it.
+
+The refusal is typed and belongs to the LIBRARY vocabulary, never to the frozen wire one: the code
+is `NETWORK_ACCESS_REFUSED`, and it is a new library code
+(`python/visionlens/src/visionlens/errors.py:106`). The ten frozen wire codes stay exactly the
+ten they were.
+
+The text of an image is data because the model never reads text. The input of the model is a
+tensor of numbers, and the boundary refuses a value that is not a number with the library code
+`NON_NUMERIC_PIXEL` (`python/visionlens/src/visionlens/io/preprocess.py:51`). The decoder reads
+one tag of the EXIF, the orientation, and extracts no text at all, so the pixels of a file that
+carries an instruction are the pixels of a file that carries none.
+
+**What this amendment does not change.** The wire protocol, the ownership boundary, the entity
+rules, the compatibility rules and the security and test obligations stand as accepted. The
+gates of the loader keep their order and their power: the permission, the license, the source, the
+pinned revision and the digest still decide WHAT may be fetched, and the guard only makes sure
+that the process reaches the network through one of those gates and not around them.
+
 ## As built today
 
 | Side | Ships | Evidence |

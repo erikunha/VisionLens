@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping, Tuple
 
 from ..encoder import components_from_preprocessor_config, fingerprint_of_components
+from ..errors import NonNumericPixelError
 
 #: The resample names the specification understands, and the Pillow code
 #: each one names.
@@ -46,6 +47,27 @@ class PreprocessedImage:
     height: int
     channels: int
     values: Tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        """Refuse anything that is not a pixel.
+
+        The model reads numbers, and only numbers. The text of an image is
+        DATA and never an instruction
+        (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`), so a value
+        that is not a number is refused at this boundary instead of being
+        carried into the model as something to read.
+
+        @raises NonNumericPixelError when a value is not a number.
+        """
+        for value in self.values:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise NonNumericPixelError(
+                    "the input of the model carries a value that is not a pixel "
+                    "("
+                    + type(value).__name__
+                    + "); the text of an image is data and never reaches the "
+                    "model as an instruction"
+                )
 
     @property
     def shape(self) -> Tuple[int, int, int]:

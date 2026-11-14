@@ -182,6 +182,12 @@ exhausts the memory budget is retried with fewer images a bounded
 number of times, and the back off is an event that names the old and
 the new batch size.
 
+The text of an image is data and never an instruction. The decoder reads
+the orientation tag of the EXIF and extracts no text at all, and the input
+of the model is numbers only: a value that is not a pixel is refused at
+the boundary of the preprocessing with the library code
+`NON_NUMERIC_PIXEL`.
+
 ### The golden parity gate
 
 One golden file, read by both languages, and a gate that compares the
@@ -297,6 +303,23 @@ The frozen error vocabulary (`UNSUPPORTED_PROTOCOL`, `MISSING_EXTRA`,
 `PROVIDER_UNAVAILABLE`) with its retryable flags lives in
 `visionlens.errors`. The simulated path never emits `PROVIDER_UNAVAILABLE`;
 it is reserved for the real provider seam (`PROVIDER_BASE_URL`).
+
+The worker runs with the network DISABLED: the guard of
+`visionlens.runtime.netguard` patches the socket layer for the whole
+process, so every connection attempt is refused with the library code
+`NETWORK_ACCESS_REFUSED`. Provider access has to be explicitly required
+for this worker to reach the network, and even then only inside an
+explicit scope:
+
+```sh
+VISIONLENS_WORKER_NETWORK=required python -m visionlens.worker
+```
+
+The value is read as the refusal unless it is exactly `required`, and the
+default is the refusal. The loader of the weights opens the scope around
+its fetch, and the gates above it (the permission, the license, the
+source, the pinned revision and the digest) still decide what may be
+fetched.
 
 ## Golden transcript
 

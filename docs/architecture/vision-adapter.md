@@ -84,6 +84,52 @@ side validates with
 file is committed, so the Python side and the TypeScript side validate
 against the same contract.
 
+## The network and the text of an image
+
+The pack puts two conditions on the worker of an isolated inference: the
+network is DISABLED unless provider access is explicitly required, and the
+text of an image is DATA and never an instruction
+(`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`).
+
+The network is a property of the PROCESS, not of a function. The guard
+patches the socket layer while it is installed and restores it when it is
+removed, so it covers the threads that serve the requests too
+(`python/visionlens/src/visionlens/runtime/netguard.py:42`). Every
+connection attempt inside a guarded worker is refused with the typed error
+`NETWORK_ACCESS_REFUSED`, and two gates stand between the worker and the
+network:
+
+- the MODE of the worker: provider access has to be explicitly required
+  for this worker, and the default says it was not
+  (`python/visionlens/src/visionlens/worker.py:43`). The mode is read
+  from `VISIONLENS_WORKER_NETWORK`, and an unrecognised value is read as
+  the refusal, because an unknown request for the network is not a request
+  for the network;
+- the SCOPE: even a worker that requires provider access reaches the
+  network only inside an explicit allowance, and only for as long as the
+  scope lasts
+  (`python/visionlens/src/visionlens/runtime/netguard.py:143`).
+
+The loader of the weights opens that scope around its fetch
+(`python/visionlens/src/visionlens/encoders/weights.py:719`), and the
+scope is a request and not a permission: in a worker that did not require
+provider access, the fetch is refused by the guard even though the loader
+asked for it. The gates of the loader (the permission, the license, the
+source, the pinned revision and the digest) stand above the scope, and
+they are what decides WHAT may be fetched.
+
+The text of an image is data because the model never reads text. The
+input of the model is a tensor of numbers, and the boundary refuses
+anything that is not a number with the typed error `NON_NUMERIC_PIXEL`
+(`python/visionlens/src/visionlens/io/preprocess.py:51`). The decoder
+reads one tag of the EXIF, the orientation, and extracts no text at all:
+the pixels of a file that carries an instruction in its metadata are the
+same pixels as the pixels of a file that carries none, and the digest of
+the preprocessed values is the same for both
+(`python/visionlens/tests/test_image_text_is_data.py`). This ticket does
+no OCR, so no text is extracted, and what is not extracted cannot be
+obeyed.
+
 ## The golden parity gate
 
 One golden file, read by both languages, and a gate that compares three

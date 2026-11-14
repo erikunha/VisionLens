@@ -50,6 +50,7 @@ from ..downloads import (
 )
 from ..hashing import sha256_of_bytes, sha256_of_file
 from ..registry.record import ModelRecord
+from ..runtime.netguard import network_access
 
 #: The repositories the platform may fetch weights from. A source outside
 #: this list is refused before the fetch.
@@ -722,16 +723,23 @@ def fetch_chunks(url: str, timeout: float = FETCH_TIMEOUT_SECONDS) -> Iterator[b
     The default opener, used when the caller injects none. It is the only
     place in this module that touches the network, and it never follows a
     redirect to a host outside the trusted ones.
+
+    The fetch happens inside an explicit allowance of the network guard, so
+    a worker that runs with the network disabled reaches the repository
+    only through this scope, and only after the gates above it (the
+    permission, the license, the source, the pinned revision and the
+    digest) have said yes.
     """
     _check_host(url, ALLOWED_SOURCES)
     opener = build_opener(CheckedRedirects)
-    # The host was allowlisted above, and every redirect is checked too.
-    with opener.open(url, timeout=timeout) as response:
-        while True:
-            block = response.read(BLOCK_BYTES)
-            if not block:
-                break
-            yield block
+    with network_access("the pinned weights of an allowlisted repository"):
+        # The host was allowlisted above, and every redirect is checked too.
+        with opener.open(url, timeout=timeout) as response:
+            while True:
+                block = response.read(BLOCK_BYTES)
+                if not block:
+                    break
+                yield block
 
 
 def _write_stream(target: Path, blocks: Iterable[bytes]) -> Tuple[str, int, Path]:
