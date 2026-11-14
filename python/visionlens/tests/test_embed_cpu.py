@@ -29,8 +29,11 @@ from visionlens.errors import (
 from visionlens.inference.artifact import (
     MANIFEST_SCHEMA_VERSION,
     UNKNOWN,
+    EmbeddingRunManifest,
+    latency_percentiles,
     manifest_from_dict,
     read_embedding_artifact,
+    write_embedding_artifact,
 )
 from visionlens.inference.batching import BatchScheduler
 from visionlens.inference.embedder import EmbedAsset, EmbedRequest, VisionEmbedder
@@ -138,6 +141,26 @@ def test_the_vectors_are_on_disk_and_the_frame_carries_no_payload(tmp_path: Path
     assert not hasattr(result, "vectors")
 
 
+def test_the_artifact_is_published_whole_or_not_at_all(tmp_path: Path, monkeypatch):
+    # A directory that carries the vectors of a run and no manifest looks
+    # like a run that nobody can read, so the vectors are removed with the
+    # manifest that failed to be written.
+    from visionlens.inference import artifact as artifact_module
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(artifact_module, "_write_atomic", refuse)
+    embedder = _embedder(tmp_path)
+
+    with pytest.raises(OSError):
+        embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
+
+    root = tmp_path / "artifacts-root" / "artifacts" / "embedding"
+    leftovers = list(root.glob("*/vectors.f32")) if root.exists() else []
+    assert leftovers == []
+
+
 def test_the_manifest_carries_every_field_of_fr_011(tmp_path: Path):
     # Task 2.3: the manifest carries the schema version, the run id, the
     # model, the revision, the source, the digest, the preprocessing, the
@@ -187,15 +210,37 @@ def test_the_manifest_carries_every_field_of_fr_011(tmp_path: Path):
 
 def test_a_value_that_does_not_exist_reads_unknown_and_not_zero(tmp_path: Path):
     # FR-012: a measurement that was never taken is `unknown`.
-    embedder = _embedder(tmp_path)
-
-    result = embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=()))
-    payload = json.loads(
-        (result.artifact_path / "manifest.json").read_text(encoding="utf8")
+    # The empty run that used to prove it is refused since 2026-11-14: a
+    # run that embedded nothing is not a run. The property lives in the
+    # manifest and in its writer, so it is proved there.
+    manifest = EmbeddingRunManifest(
+        embedding_run_id="embed-unknown",
+        model_id="siglip2-base",
+        revision="rev",
+        source_uri="https://example.invalid/model.safetensors",
+        weights_digest="a" * 64,
+        preprocessing_fingerprint="fp2:0123456789abcdef",
+        preprocessing_components={},
+        snapshot_id="snapshot-test",
+        asset_sha256=(),
+        count=0,
+        dimension=4,
+        dtype="float32",
+        vectors_file_digest="",
+        device="cpu",
+        runtime_versions={},
+        created_at="2026-11-14T00:00:00.000Z",
+        latency=latency_percentiles([]),
+        peak_memory_bytes=UNKNOWN,
+        license="apache-2.0",
+        calibration_status="uncalibrated",
     )
+    artifact = write_embedding_artifact(tmp_path / "artifacts", manifest, [])
+    payload = json.loads(artifact.manifest_path.read_text(encoding="utf8"))
 
     assert payload["latency"]["p50Ms"] == UNKNOWN
     assert payload["latency"]["totalMs"] == UNKNOWN
+    assert payload["peakMemoryBytes"] == UNKNOWN
     assert payload["count"] == 0
 
 
@@ -450,7 +495,11 @@ def test_a_run_where_every_image_was_refused_fails_and_publishes_nothing(
 
     assert excinfo.value.code == LibraryErrorCode.EMBEDDING_RUN_EMPTY
     assert len(excinfo.value.samples) == len(_assets())
-    assert excinfo.value.samples[0][1] == "IMAGE_METADATA_UNREADABLE"
+    # Each sample is the asset id, the path, the code and the message.
+    asset_id, _path, code, message = excinfo.value.samples[0]
+    assert asset_id == _assets()[0].asset_id
+    assert code == "IMAGE_METADATA_UNREADABLE"
+    assert "three channels" in message
     # The run published nothing.
     assert not (tmp_path / "artifacts-root").exists()
 

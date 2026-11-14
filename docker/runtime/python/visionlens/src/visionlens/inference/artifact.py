@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -198,7 +199,7 @@ def artifact_directory(root: Path, run_id: str, kind: str = ARTIFACT_KIND) -> Pa
     """The directory an artifact lives in.
 
     The layout is the pack's: `artifacts/<kind>/<run-id>/`
-    (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:33`).
+    (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:35`).
     """
     return Path(root) / "artifacts" / kind / run_id
 
@@ -266,10 +267,21 @@ def write_embedding_artifact(
         }
     ).with_digest()
     manifest_path = directory / MANIFEST_FILE_NAME
-    _write_atomic(
-        manifest_path,
-        json.dumps(filled.to_dict(), sort_keys=True, indent=2).encode("utf8"),
-    )
+    try:
+        _write_atomic(
+            manifest_path,
+            json.dumps(filled.to_dict(), sort_keys=True, indent=2).encode("utf8"),
+        )
+    except BaseException:
+        # The artifact is published WHOLE or not at all: a directory that
+        # carries the vectors of a run and no manifest is an orphan that
+        # looks like a run, so it is removed with them.
+        try:
+            vectors_path.unlink()
+        except OSError:
+            pass
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
     return EmbeddingArtifact(
         directory=directory,
         manifest_path=manifest_path,

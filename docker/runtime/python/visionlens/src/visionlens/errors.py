@@ -146,19 +146,22 @@ class ConfigVersionUnsupportedError(LibraryError):
 
 
 class EmbeddingRunEmptyError(LibraryError):
-    """No image of the run could be embedded.
+    """The run embedded nothing, so it has nothing to publish.
 
-    A run in which every image was refused has nothing to publish, so the
-    run FAILS with this error instead of writing an empty artifact and
-    answering with a success that carries no vector
+    A run in which every image was refused, and a run that carried no image
+    at all, have nothing to publish: the run FAILS with this error instead
+    of writing an artifact with no vector in it and answering with a
+    success. The pack asks that a new result artifact becomes visible only
+    after its checksum and its atomic completion
     (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`).
 
     The samples of the refusals travel with the error, so the caller sees
-    WHY each image was refused and not only that the run was empty.
+    WHY each image was refused and not only that the run was empty. Each
+    sample is the asset id, the path, the code and the message.
     """
 
     def __init__(
-        self, message: str, samples: Sequence[tuple[str, str]] = ()
+        self, message: str, samples: Sequence[tuple[str, str, str, str]] = ()
     ) -> None:
         super().__init__(LibraryErrorCode.EMBEDDING_RUN_EMPTY, message)
         self.samples = tuple(samples)

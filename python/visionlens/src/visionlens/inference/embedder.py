@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..encoders.base import Encoder, EncoderOutput
-from ..errors import EmbeddingRunEmptyError, LibraryError, LibraryErrorCode
+from ..errors import EmbeddingRunEmptyError, LibraryError, LibraryErrorCode, ModelRunFailedError
 from ..io.decode import DecodeService
 from ..io.preprocess import PreprocessingSpec
 from ..registry.record import ModelRecord
@@ -180,22 +180,44 @@ class VisionEmbedder:
             prepared.append((asset, preprocessed))
 
         vectors: list[Tuple[float, ...]] = []
-        samples = tuple((error.asset_id, error.code) for error in errors)
-        if prepared:
-            output = self._embed_in_batches(prepared, latencies, fallbacks)
-            vectors = list(output.vectors)
-        elif errors:
-            # Every image of the run was refused, so the run has nothing to
-            # publish. A run that embedded nothing is not a run: it fails
-            # with ONE typed error and writes no artifact, instead of
-            # answering with a success that carries no vector
+        samples = tuple(
+            (error.asset_id, error.path, error.code, error.message) for error in errors
+        )
+        if not prepared:
+            # The run embedded nothing: either every image was refused, or
+            # the run carried no image at all. There is nothing to publish,
+            # so the run FAILS with ONE typed error and writes no artifact,
+            # instead of answering with a success that carries no vector.
+            # The pack asks that a new result artifact becomes visible only
+            # after its checksum and its atomic completion
             # (docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26).
+            if not request.assets:
+                raise EmbeddingRunEmptyError(
+                    "the run carried no image at all, and a run that embedded "
+                    "nothing is not a run"
+                )
             raise EmbeddingRunEmptyError(
                 "no image of the run could be embedded: "
                 + ", ".join(
-                    asset_id + " (" + code + ")" for asset_id, code in samples
+                    asset_id + " (" + code + "): " + message
+                    for asset_id, _path, code, message in samples
                 ),
                 samples=samples,
+            )
+        output = self._embed_in_batches(prepared, latencies, fallbacks)
+        vectors = list(output.vectors)
+        if len(vectors) != len(prepared):
+            # The encoder answered with another number of vectors than the
+            # number of images it was given. The manifest pairs a vector
+            # with an asset BY POSITION, so a count that does not match
+            # would pair the wrong vector with the wrong asset.
+            raise ModelRunFailedError(
+                "the encoder answered with "
+                + str(len(vectors))
+                + " vectors for the "
+                + str(len(prepared))
+                + " images it was given, and the manifest pairs a vector "
+                "with an asset by position"
             )
         asset_digests = tuple(digests)
 
@@ -301,8 +323,6 @@ class VisionEmbedder:
 
     def _model_error(self, exc: Exception) -> LibraryError:
         """The typed error of a model that refused the batch."""
-        from ..errors import ModelRunFailedError
-
         return ModelRunFailedError("the model refused the batch: " + str(exc))
 
 

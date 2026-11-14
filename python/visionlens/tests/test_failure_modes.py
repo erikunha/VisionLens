@@ -42,6 +42,7 @@ from visionlens.encoders.weights import (
 from visionlens.errors import (
     EmbeddingRunEmptyError,
     ImageDimensionsExceededError,
+    ModelRunFailedError,
     ImageMetadataUnreadableError,
     LibraryError,
     LibraryErrorCode,
@@ -99,6 +100,20 @@ class _MemoryHungryEncoder(_StubEncoder):
     def embed(self, images: Sequence[Any]) -> EncoderOutput:
         self.calls.append(len(images))
         raise MemoryError("the model does not fit in the memory budget")
+
+
+class _ShortEncoder(_StubEncoder):
+    """An encoder that answers with fewer vectors than it was given."""
+
+    def embed(self, images: Sequence[Any]) -> EncoderOutput:
+        self.calls.append(len(images))
+        return EncoderOutput(
+            vectors=tuple(
+                tuple(float(index) for index in range(4)) for _ in images[:-1]
+            ),
+            dimension=self.dimension,
+            dtype=self.dtype,
+        )
 
 
 def _record(**overrides: Any) -> Any:
@@ -390,7 +405,53 @@ def test_a_failed_run_publishes_no_artifact(tmp_path: Path):
         )
 
     assert excinfo.value.code == LibraryErrorCode.EMBEDDING_RUN_EMPTY
-    assert excinfo.value.samples == (("bomb", LibraryErrorCode.IMAGE_DIMENSIONS_EXCEEDED.value),)
+    # Each sample is the asset id, the path, the code and the message, so
+    # the caller sees WHY the image was refused and not only that it was.
+    assert len(excinfo.value.samples) == 1
+    asset_id, path, code, message = excinfo.value.samples[0]
+    assert asset_id == "bomb"
+    assert path.endswith("bomb.png")
+    assert code == LibraryErrorCode.IMAGE_DIMENSIONS_EXCEEDED.value
+    assert "20000" in message
+    assert _published_artifacts(tmp_path / "artifacts") == []
+
+
+def test_a_run_with_no_image_at_all_is_refused(tmp_path: Path):
+    # A run that carried no image embedded nothing, and a run that embedded
+    # nothing is not a run: it is refused and it publishes nothing.
+    embedder = _embedder(tmp_path)
+
+    with pytest.raises(EmbeddingRunEmptyError) as excinfo:
+        embedder.embed(EmbedRequest(snapshot_id="snapshot-1", assets=()))
+
+    assert excinfo.value.code == LibraryErrorCode.EMBEDDING_RUN_EMPTY
+    assert excinfo.value.samples == ()
+    assert _published_artifacts(tmp_path / "artifacts") == []
+
+
+def test_an_encoder_that_answers_with_fewer_vectors_is_refused(tmp_path: Path):
+    # The manifest pairs a vector with an asset BY POSITION, so a count
+    # that does not match the images would pair the wrong vector with the
+    # wrong asset. The run fails instead of publishing the mismatch.
+    root = tmp_path / "images"
+    root.mkdir()
+    for name in ("red.jpg", "green.jpg"):
+        (root / name).write_bytes((FIXTURES_DIR / name).read_bytes())
+    embedder = _embedder(tmp_path, encoder=_ShortEncoder(), root=root)
+
+    with pytest.raises(ModelRunFailedError) as excinfo:
+        embedder.embed(
+            EmbedRequest(
+                snapshot_id="snapshot-1",
+                assets=(
+                    EmbedAsset(asset_id="red", path=root / "red.jpg"),
+                    EmbedAsset(asset_id="green", path=root / "green.jpg"),
+                ),
+            )
+        )
+
+    assert excinfo.value.code == LibraryErrorCode.MODEL_RUN_FAILED
+    assert "1 vectors" in str(excinfo.value)
     assert _published_artifacts(tmp_path / "artifacts") == []
 
 
