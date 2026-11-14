@@ -31,7 +31,7 @@ worker protocol is the only runtime boundary between them.**
    (`python/visionlens/pyproject.toml:6`). It owns the encoder, the preprocessing fingerprint,
    the model registry, the operation handlers and the worker process
    (`python/visionlens/src/visionlens/encoder.py:56`, `registry/simulated.py:109`, `operations.py:278`,
-   `worker.py:183`). Its API works from a Python process without Node, Fastify or the npm SDK
+   `worker.py:212`). Its API works from a Python process without Node, Fastify or the npm SDK
    (`docs/vnext/02-ARCHITECTURE-DECISION.md:5`). As built the runtime is deterministic and
    carries two direct third-party dependencies, Pydantic and Pillow, with the four transitive
    packages Pydantic brings; the typed facade needs Pydantic and the image decoder needs Pillow
@@ -60,7 +60,7 @@ worker protocol is the only runtime boundary between them.**
    (`docs/vnext/07-CONTRACTS-PROTOCOL.md:5`).
 5. Versioning: contracts are `1.0.0` with a breaking change requiring a major bump, decided by
    `checkVersionBump` (`packages/contracts/src/version.ts:9`,
-   `packages/contracts/src/version-guard.ts:215`). The protocol version is independent and
+   `packages/contracts/src/version-guard.ts:248`). The protocol version is independent and
    mirrored at `1.0.0` on both sides (`packages/contracts/src/worker/protocol.ts:25`,
    `python/visionlens/src/visionlens/protocol.py:19`), and the protocol major lives inside the
    id string, so a major change is a handshake refusal, not a version bump
@@ -226,16 +226,25 @@ metadata must never be able to say what the platform does.
 than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
 
 - the guard patches the socket layer while it is installed and restores it when it is removed, so
-  it covers the threads that serve the requests and not only the thread that installed it;
+  it covers the threads that serve the requests and not only the thread that installed it. It
+  refuses every connection, every outbound datagram and the resolution of any name that is not
+  local, on the Python socket class and on the raw socket of the C module;
 - two gates stand between the worker and the network. The MODE of the worker: provider access has
   to be explicitly required for this worker, and the default says it was not
   (`python/visionlens/src/visionlens/worker.py:43`). The SCOPE: even a worker that requires
   provider access reaches the network only inside an explicit allowance, and only for as long as
-  the scope lasts;
+  the scope lasts. The allowance belongs to the THREAD that opened it, so a scope never opens the
+  door for the other threads of the worker;
 - the loader of the weights opens that scope around its fetch
-  (`python/visionlens/src/visionlens/encoders/weights.py:719`), and the scope is a request and
+  (`python/visionlens/src/visionlens/encoders/weights.py:735`), and the scope is a request and
   not a permission: a worker that did not require provider access refuses the fetch even though
   the loader asked for it.
+
+The limits of the guard are part of the decision and are not glossed over: it is a defense IN
+PROCESS. It does not reach a child process, because a fork or a subprocess leaves the patched
+process and answers for itself, and it does not reach a socket that was created before it was
+installed. The isolation of a worker that must not reach the network is the sandbox that runs
+it, and the guard is the defense inside that sandbox.
 
 The refusal is typed and belongs to the LIBRARY vocabulary, never to the frozen wire one: the code
 is `NETWORK_ACCESS_REFUSED`, and it is a new library code
@@ -246,7 +255,8 @@ The text of an image is data because the model never reads text. The input of th
 tensor of numbers, and the boundary refuses a value that is not a number with the library code
 `NON_NUMERIC_PIXEL` (`python/visionlens/src/visionlens/io/preprocess.py:51`). The decoder reads
 one tag of the EXIF, the orientation, and extracts no text at all, so the pixels of a file that
-carries an instruction are the pixels of a file that carries none.
+carries an instruction are the pixels of a file that carries none. It also drops the metadata
+of the picture it returns, so the text of the file does not travel with the pixels at all.
 
 **What this amendment does not change.** The wire protocol, the ownership boundary, the entity
 rules, the compatibility rules and the security and test obligations stand as accepted. The
@@ -324,7 +334,7 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
 |---|---|---|
 | CLI bins | `vision-lens` stays canonical, `ai-image-labeling` stays as an alias with a sunset policy (`docs/vnext/02-ARCHITECTURE-DECISION.md:30`) | both bins unchanged (`packages/cli/package.json:10-11`); no sunset date set yet |
 | npm SDK | root exports are kept until a versioned migration; a lightweight client is a new entrypoint, never a silent replacement (`docs/vnext/02-ARCHITECTURE-DECISION.md:31`) | exports still `.` and `./cli` (`packages/sdk/package.json:7-9`); `./client` not yet added |
-| Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:215`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
+| Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:248`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
 | Store | forward-only migrations, SQLite store preserved, not replaced (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:5`) | `packages/core/src/store/migrations/` |
 | Persisted snapshots and datasets | versioned; incompatible changes need explicit migration (`docs/vnext/02-ARCHITECTURE-DECISION.md:34`) | tracked manifests unchanged by this ADR |
 | Cross-language operations | stable operation codes, error codes and emitted metrics; English model text never decides program control (`docs/vnext/02-ARCHITECTURE-DECISION.md:35`) | frozen on both sides (`packages/contracts/src/worker/protocol.ts:64-118`) |

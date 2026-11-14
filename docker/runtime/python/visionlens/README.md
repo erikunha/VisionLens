@@ -311,7 +311,8 @@ it is reserved for the real provider seam (`PROVIDER_BASE_URL`).
 
 The worker runs with the network DISABLED: the guard of
 `visionlens.runtime.netguard` patches the socket layer for the whole
-process, so every connection attempt is refused with the library code
+process, so every connection attempt, every outbound datagram and the
+resolution of any name that is not local are refused with the library code
 `NETWORK_ACCESS_REFUSED`. Provider access has to be explicitly required
 for this worker to reach the network, and even then only inside an
 explicit scope:
@@ -320,11 +321,19 @@ explicit scope:
 VISIONLENS_WORKER_NETWORK=required python -m visionlens.worker
 ```
 
-The value is read as the refusal unless it is exactly `required`, and the
-default is the refusal. The loader of the weights opens the scope around
+The value is read as the refusal unless it names `required`, whatever the
+case, and the default is the refusal. The loader of the weights opens the scope around
 its fetch, and the gates above it (the permission, the license, the
 source, the pinned revision and the digest) still decide what may be
 fetched.
+
+The scope belongs to the thread that opened it: a scope never opens the
+door for the other threads of the worker. The guard is a defense IN
+PROCESS. It does not reach a child process, because a fork or a
+subprocess leaves the patched process and answers for itself, and it does
+not reach a socket that was created before it was installed. The
+isolation of a worker that must not reach the network is the sandbox that
+runs it.
 
 ## Golden transcript
 

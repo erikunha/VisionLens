@@ -128,7 +128,7 @@ socket module before resolving.
 
 Fetching the bytes the record names is the loader's job, and the loader is
 the only place in the runtime where a model artifact can be fetched
-(`python/visionlens/src/visionlens/encoders/weights.py:719`, `:832`). Six gates
+(`python/visionlens/src/visionlens/encoders/weights.py:735`, `:840`). Six gates
 stand between a request and a byte, and every one of them runs before the
 fetch:
 

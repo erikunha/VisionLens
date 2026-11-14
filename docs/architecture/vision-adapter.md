@@ -67,7 +67,7 @@ processor of the model produces, and the recorded difference is 2.57e-08.
 
 The vectors of a run are a binary file beside a manifest, under
 `artifacts/<kind>/<run-id>/`
-(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:33`). The vectors never
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:35`). The vectors never
 travel inside a JSON line and the manifest never carries a base64
 payload (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`).
 
@@ -99,10 +99,11 @@ text of an image is DATA and never an instruction
 The network is a property of the PROCESS, not of a function. The guard
 patches the socket layer while it is installed and restores it when it is
 removed, so it covers the threads that serve the requests too
-(`python/visionlens/src/visionlens/runtime/netguard.py:42`). Every
-connection attempt inside a guarded worker is refused with the typed error
-`NETWORK_ACCESS_REFUSED`, and two gates stand between the worker and the
-network:
+(`python/visionlens/src/visionlens/runtime/netguard.py:91`). It refuses
+every connection, every outbound datagram and the resolution of any name
+that is not local, on the Python socket class and on the raw socket of the
+C module, and every refusal is the typed error `NETWORK_ACCESS_REFUSED`.
+Two gates stand between the worker and the network:
 
 - the MODE of the worker: provider access has to be explicitly required
   for this worker, and the default says it was not
@@ -113,10 +114,20 @@ network:
 - the SCOPE: even a worker that requires provider access reaches the
   network only inside an explicit allowance, and only for as long as the
   scope lasts
-  (`python/visionlens/src/visionlens/runtime/netguard.py:143`).
+  (`python/visionlens/src/visionlens/runtime/netguard.py:326`). The
+  allowance belongs to the THREAD that opened it, so a scope never opens
+  the door for the other threads of the worker, and the reason of the open
+  scope is logged and named in the message of a refusal.
+
+The limits of the guard are declared and not glossed over: it is a
+defense IN PROCESS. It does not reach a child process, because a fork or
+a subprocess leaves the patched process and answers for itself, and it
+does not reach a socket that was created before it was installed. The
+isolation of a worker that must not reach the network is the sandbox that
+runs it, and the guard is the defense inside that sandbox.
 
 The loader of the weights opens that scope around its fetch
-(`python/visionlens/src/visionlens/encoders/weights.py:720`), and the
+(`python/visionlens/src/visionlens/encoders/weights.py:735`), and the
 scope is a request and not a permission: in a worker that did not require
 provider access, the fetch is refused by the guard even though the loader
 asked for it. The gates of the loader (the permission, the license, the
@@ -131,9 +142,10 @@ reads one tag of the EXIF, the orientation, and extracts no text at all:
 the pixels of a file that carries an instruction in its metadata are the
 same pixels as the pixels of a file that carries none, and the digest of
 the preprocessed values is the same for both
-(`python/visionlens/tests/test_image_text_is_data.py`). This ticket does
-no OCR, so no text is extracted, and what is not extracted cannot be
-obeyed.
+(`python/visionlens/tests/test_image_text_is_data.py`). The decoder also
+DROPS the metadata of the picture it returns, so the text of the file
+does not travel with the pixels at all. This ticket does no OCR, so no
+text is extracted, and what is not extracted cannot be obeyed.
 
 ## The bridge and the typed result of the operation
 
@@ -142,7 +154,7 @@ the payload of a result to the operation: the result is free-form JSON but
 it must be stable per operation
 (`packages/contracts/src/worker/event.ts`). The bridge is where that
 stability is written down
-(`packages/core/src/worker/operations.ts:434`): for every operation it
+(`packages/core/src/worker/operations.ts:521`): for every operation it
 names the code, the params it sends, the typed success it accepts and the
 typed error it reports.
 
@@ -162,12 +174,14 @@ byte. The bridge accepts both and NAMES which one answered, so a caller
 can never mistake a simulated vector for a recorded run, and a payload that
 is neither is a refusal and not a guess.
 
-The typed error carries the frozen code, the message and the frozen
-retryable flag of that code, read from the frozen table and never guessed
-(`packages/core/src/worker/operations.ts:399`). A failure of the CHANNEL
-(the process did not start, the deadline elapsed) is reported with the code
-that names it, because the frozen vocabulary has no other code for it and
-the bridge never invents one.
+The typed error carries the frozen code, the message and the retryable
+flag: the frozen flag of the code, read from the frozen table and never
+guessed, for a failure the worker reported, and the flag the HOST itself
+uses for a failure of the CHANNEL, because the host is the one that
+decides whether to retry (`packages/core/src/worker/operations.ts:444`). A
+failure of the channel is reported with the code that names it, because the
+frozen vocabulary has no other code for it and the bridge never invents
+one.
 
 The validators of the bridge are written by hand instead of with Zod,
 because the owner boundary of `packages/core/src/worker/` allows the Node
