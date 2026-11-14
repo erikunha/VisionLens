@@ -26,8 +26,37 @@ from . import protocol
 from .errors import ErrorCode, WorkerError
 from .operations import OPERATION_HANDLERS, OperationContext
 from .registry import ModelRegistry
+from .runtime.netguard import network_disabled
 
 LOG = logging.getLogger("visionlens.worker")
+
+#: The environment variable that says whether this worker may reach the network.
+NETWORK_ENV = "VISIONLENS_WORKER_NETWORK"
+
+#: The default mode of a worker: the network is disabled.
+NETWORK_DISABLED = "disabled"
+
+#: The mode that says provider access is explicitly required for this worker.
+NETWORK_REQUIRED = "required"
+
+
+def network_mode(value: str | None = None) -> str:
+    """The network mode of a worker.
+
+    The default is the refusal: an isolated inference worker runs with the
+    network DISABLED, because a worker that can reach the network can be
+    turned into a client of anything that answers
+    (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`).
+
+    The other mode is the explicit request of provider access. It is never
+    the default, and an unrecognised value is read as the refusal: an
+    unknown request for the network is not a request for the network.
+    """
+    if value is None:
+        value = os.environ.get(NETWORK_ENV, "")
+    if value.strip().lower() == NETWORK_REQUIRED:
+        return NETWORK_REQUIRED
+    return NETWORK_DISABLED
 
 
 class FrameTooLargeError(Exception):
@@ -200,9 +229,11 @@ class Worker:
         wakeup_fd: int | None = None,
         wake_handler: Callable[[], None] | None = None,
         shutdown_event: threading.Event | None = None,
+        network: str = NETWORK_DISABLED,
     ) -> None:
         self._registry = registry if registry is not None else ModelRegistry.default()
         self._installed_extras = tuple(sorted(set(extras)))
+        self._network = network
         self._reader = BoundedLineReader(
             reader,
             protocol.DEFAULT_MAX_FRAME_BYTES,
@@ -222,8 +253,18 @@ class Worker:
     # ------------------------------------------------------------------
 
     def run(self) -> int:
-        """Serve frames until end of input or a shutdown signal; return 0."""
+        """Serve frames until end of input or a shutdown signal; return 0.
+
+        The network of the PROCESS is disabled by the entry point, which
+        installs the guard around the whole service: the guard is a
+        property of the process and not of a method, so it covers the
+        threads that serve the requests too.
+        """
         self._emit_hello()
+        return self._serve()
+
+    def _serve(self) -> int:
+        """The serving loop, with the frames of the host."""
         try:
             while True:
                 if self._shutdown_event.is_set():
@@ -468,8 +509,17 @@ class Worker:
             result = handler(frame.params, context)
         except WorkerError as exc:
             self._emit_terminal(state, error=exc)
-        except Exception:
-            self._logger.exception("request %s failed unexpectedly", state.request_id)
+        except Exception as exc:
+            # The log carries the request id and the class of the failure,
+            # never the message and never the traceback: a message may
+            # carry a local path, and the logs of this platform record
+            # hashes and ids instead of local paths
+            # (docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16).
+            self._logger.error(
+                "request %s failed unexpectedly (%s)",
+                state.request_id,
+                exc.__class__.__name__,
+            )
             self._emit_terminal(
                 state,
                 error=WorkerError(
@@ -626,33 +676,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _wake() -> None:
         raise _GracefulExit("shutdown signal")
 
+    provider_access = network_mode() == NETWORK_REQUIRED
+    if provider_access:
+        LOG.info(
+            "provider access was explicitly required for this worker; the "
+            "network is reachable only inside an explicit scope"
+        )
+    else:
+        LOG.info("the network is disabled for this worker")
+
     try:
         signal.set_wakeup_fd(wake_write_fd)
         for signum in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[signum] = signal.signal(signum, _on_signal)
-        worker = Worker(
-            reader=sys.stdin.buffer,
-            writer=sys.stdout.buffer,
-            wakeup_fd=wake_read_fd,
-            wake_handler=_wake,
-            shutdown_event=shutdown_event,
-        )
-        try:
-            return worker.run()
-        except _GracefulExit:
-            # A signal landed outside the reader loop; daemon threads stop
-            # with the process and the host is tearing the session down.
-            return 0
-        except BrokenPipeError:
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-            return 0
-        finally:
+        # The guard stays installed until the process is gone: a request
+        # thread that outlived the shutdown cannot reach the network
+        # afterwards.
+        with network_disabled(provider_access=provider_access, restore=False):
+            worker = Worker(
+                reader=sys.stdin.buffer,
+                writer=sys.stdout.buffer,
+                wakeup_fd=wake_read_fd,
+                wake_handler=_wake,
+                shutdown_event=shutdown_event,
+                network=network_mode(),
+            )
             try:
-                sys.stdout.buffer.flush()
-            except Exception:
+                return worker.run()
+            except _GracefulExit:
+                # A signal landed outside the reader loop; daemon threads stop
+                # with the process and the host is tearing the session down.
+                return 0
+            except BrokenPipeError:
                 devnull = os.open(os.devnull, os.O_WRONLY)
                 os.dup2(devnull, sys.stdout.fileno())
+                return 0
+            finally:
+                try:
+                    sys.stdout.buffer.flush()
+                except Exception:
+                    devnull = os.open(os.devnull, os.O_WRONLY)
+                    os.dup2(devnull, sys.stdout.fileno())
     finally:
         signal.set_wakeup_fd(-1)
         for restored_signum, handler in previous_handlers.items():

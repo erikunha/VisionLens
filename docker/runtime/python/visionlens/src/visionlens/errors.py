@@ -34,6 +34,7 @@ picks the code):
 from __future__ import annotations
 
 import enum
+from typing import Sequence
 
 
 class ErrorCode(str, enum.Enum):
@@ -95,10 +96,17 @@ class LibraryErrorCode(str, enum.Enum):
     CLIENT_CLOSED = "CLIENT_CLOSED"
     CONFIG_INVALID = "CONFIG_INVALID"
     CONFIG_VERSION_UNSUPPORTED = "CONFIG_VERSION_UNSUPPORTED"
+    EMBEDDING_RUN_EMPTY = "EMBEDDING_RUN_EMPTY"
     IMAGE_DIMENSIONS_EXCEEDED = "IMAGE_DIMENSIONS_EXCEEDED"
+    EXTRA_NOT_INSTALLED = "EXTRA_NOT_INSTALLED"
     IMAGE_METADATA_UNREADABLE = "IMAGE_METADATA_UNREADABLE"
     MIME_MISMATCH = "MIME_MISMATCH"
+    MODEL_RUN_FAILED = "MODEL_RUN_FAILED"
+    NON_NUMERIC_PIXEL = "NON_NUMERIC_PIXEL"
     PATH_NOT_FOUND = "PATH_NOT_FOUND"
+    PATH_OUTSIDE_ROOT = "PATH_OUTSIDE_ROOT"
+    NETWORK_ACCESS_REFUSED = "NETWORK_ACCESS_REFUSED"
+    RESOURCE_EXHAUSTED = "RESOURCE_EXHAUSTED"
     UNSUPPORTED_DEVICE = "UNSUPPORTED_DEVICE"
     UNSUPPORTED_FILE_TYPE = "UNSUPPORTED_FILE_TYPE"
 
@@ -137,6 +145,28 @@ class ConfigVersionUnsupportedError(LibraryError):
         super().__init__(LibraryErrorCode.CONFIG_VERSION_UNSUPPORTED, message)
 
 
+class EmbeddingRunEmptyError(LibraryError):
+    """The run embedded nothing, so it has nothing to publish.
+
+    A run in which every image was refused, and a run that carried no image
+    at all, have nothing to publish: the run FAILS with this error instead
+    of writing an artifact with no vector in it and answering with a
+    success. The pack asks that a new result artifact becomes visible only
+    after its checksum and its atomic completion
+    (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`).
+
+    The samples of the refusals travel with the error, so the caller sees
+    WHY each image was refused and not only that the run was empty. Each
+    sample is the asset id, the path, the code and the message.
+    """
+
+    def __init__(
+        self, message: str, samples: Sequence[tuple[str, str, str, str]] = ()
+    ) -> None:
+        super().__init__(LibraryErrorCode.EMBEDDING_RUN_EMPTY, message)
+        self.samples = tuple(samples)
+
+
 class ImageDimensionsExceededError(LibraryError):
     """The declared image dimensions exceed the cap."""
 
@@ -158,11 +188,68 @@ class MimeMismatchError(LibraryError):
         super().__init__(LibraryErrorCode.MIME_MISMATCH, message)
 
 
+class MissingExtraError(LibraryError):
+    """The capability an operation needs is not installed in this environment.
+
+    The code is `EXTRA_NOT_INSTALLED` and not the wire code `MISSING_EXTRA`:
+    the library vocabulary never reuses a code of the frozen wire one.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.EXTRA_NOT_INSTALLED, message)
+
+
+class ModelRunFailedError(LibraryError):
+    """The model refused the batch it was given."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.MODEL_RUN_FAILED, message)
+
+
+class ResourceExhaustedError(LibraryError):
+    """The run exhausted the memory budget, and the attempts are bounded."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.RESOURCE_EXHAUSTED, message)
+
+
+class NetworkAccessRefusedError(LibraryError):
+    """The worker reached for the network without being allowed to.
+
+    The worker of an isolated inference runs with the network disabled
+    unless provider access is explicitly required
+    (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`).
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.NETWORK_ACCESS_REFUSED, message)
+
+
+class NonNumericPixelError(LibraryError):
+    """A value that is not a pixel reached the input of the model.
+
+    The text of an image is DATA and never an instruction
+    (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`), so the input
+    of the model accepts numbers only: a string that reaches this boundary
+    is refused instead of being read as something to obey.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.NON_NUMERIC_PIXEL, message)
+
+
 class PathNotFoundError(LibraryError):
     """The path does not name a readable file."""
 
     def __init__(self, message: str) -> None:
         super().__init__(LibraryErrorCode.PATH_NOT_FOUND, message)
+
+
+class PathOutsideRootError(LibraryError):
+    """The path resolves outside the approved root it may be read from."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(LibraryErrorCode.PATH_OUTSIDE_ROOT, message)
 
 
 class UnsupportedDeviceError(LibraryError):

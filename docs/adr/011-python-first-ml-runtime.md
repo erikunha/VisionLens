@@ -31,14 +31,14 @@ worker protocol is the only runtime boundary between them.**
    (`python/visionlens/pyproject.toml:6`). It owns the encoder, the preprocessing fingerprint,
    the model registry, the operation handlers and the worker process
    (`python/visionlens/src/visionlens/encoder.py:56`, `registry/simulated.py:109`, `operations.py:278`,
-   `worker.py:182`). Its API works from a Python process without Node, Fastify or the npm SDK
+   `worker.py:212`). Its API works from a Python process without Node, Fastify or the npm SDK
    (`docs/vnext/02-ARCHITECTURE-DECISION.md:5`). As built the runtime is deterministic and
-   carries one direct third-party dependency, Pydantic, with the four transitive packages it
-   brings; the typed facade needs it
-   (`dependencies = ["pydantic>=2.12,<3"]`, `python/visionlens/pyproject.toml:16`; the amendment
-   below records the decision and its date); the PyTorch, scikit-learn and Transformers adapters
-   remain optional extras whose sets are frozen but still empty
-   (`python/visionlens/pyproject.toml:21-25`).
+   carries two direct third-party dependencies, Pydantic and Pillow, with the four transitive
+   packages Pydantic brings; the typed facade needs Pydantic and the image decoder needs Pillow
+   (`dependencies = ["pydantic>=2.12,<3", "pillow>=13,<14"]`, `python/visionlens/pyproject.toml:18`;
+   the amendments below record both decisions and their dates); the PyTorch, scikit-learn and
+   Transformers stacks remain optional extras, and only the `vision` extra carries one today
+   (`python/visionlens/pyproject.toml:30-38`).
 2. TypeScript keeps the frontend apps, the Node CLI, the npm SDK, the application API and job
    orchestration, the integrations, the local metadata store and the current legacy image
    workflow (`docs/vnext/02-ARCHITECTURE-DECISION.md:6`): `apps/`, `packages/cli/`,
@@ -55,12 +55,12 @@ worker protocol is the only runtime boundary between them.**
 4. `@vision-lens/contracts` stays canonical for external domain entities, public operation
    payloads and OpenAPI (`docs/vnext/02-ARCHITECTURE-DECISION.md:7`). Python carries no entity
    schemas: its only shared vocabulary is the frozen worker protocol
-   (`python/visionlens/src/visionlens/__init__.py:53-95`). When Python later needs entity
+   (`python/visionlens/src/visionlens/__init__.py:60-102`). When Python later needs entity
    validation, the validators are generated from versioned JSON Schema, never hand-copied
    (`docs/vnext/07-CONTRACTS-PROTOCOL.md:5`).
 5. Versioning: contracts are `1.0.0` with a breaking change requiring a major bump, decided by
    `checkVersionBump` (`packages/contracts/src/version.ts:9`,
-   `packages/contracts/src/version-guard.ts:215`). The protocol version is independent and
+   `packages/contracts/src/version-guard.ts:248`). The protocol version is independent and
    mirrored at `1.0.0` on both sides (`packages/contracts/src/worker/protocol.ts:25`,
    `python/visionlens/src/visionlens/protocol.py:19`), and the protocol major lives inside the
    id string, so a major change is a handshake refusal, not a version bump
@@ -84,11 +84,11 @@ change that ships the facade.
 
 **What changes.** The base install is no longer standard-library only. It carries Pydantic,
 with the four transitive packages Pydantic brings, and nothing else:
-`dependencies = ["pydantic>=2.12,<3"]` (`python/visionlens/pyproject.toml:16`).
+`dependencies = ["pydantic>=2.12,<3"]` (`python/visionlens/pyproject.toml:18`).
 The runtime keeps every other property the acceptance recorded: the heavy stacks (PyTorch,
 scikit-learn, Transformers, MLflow, LangGraph, FastAPI, Uvicorn) stay out of the base install,
 the extra names and their (empty) sets are unchanged
-(`python/visionlens/pyproject.toml:21-25`), the import isolation contract still holds, and no
+(`python/visionlens/pyproject.toml:30-38`), the import isolation contract still holds, and no
 GPU or ML framework enters a consumer install.
 
 **Why Pydantic and not an extras-gated config.** The facade's configuration is a typed,
@@ -124,19 +124,199 @@ amendment, together with the package tests and the mypy gate; the re-dated licen
 (`python/visionlens/release/license-audit.md`) records the license of every package the base
 install now carries.
 
+## Amendment 2026-11-14: the base install carries the image decoder too
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The amendment of 2026-11-14 put Pydantic in the base install and said the base carries
+"nothing else". That was true while the whole runtime was simulated and nothing decoded an
+image. The CPU vision adapter of VLN-005 decodes one, and the decoder is a core operation of
+the distribution, not a capability extra: a caller that installs `visionlens` and asks for an
+embedding must get an image decoder in return.
+
+**What changes.** The base install carries Pillow next to Pydantic:
+`dependencies = ["pydantic>=2.12,<3", "pillow>=13,<14"]`
+(`python/visionlens/pyproject.toml:18`). The `vision` extra keeps the heavy stack and only
+the heavy stack: torch, transformers and safetensors
+(`python/visionlens/pyproject.toml:30-34`).
+
+**Why the pack allows it.** The dependency policy names what the base install should include:
+"Pydantic, limited I/O and lightweight NumPy only if core operations truly need it", and
+forbids "no mandatory GPU/PyTorch/Transformers/MLflow download"
+(`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:34`). Pillow is the limited I/O of the image decoder,
+and no GPU, PyTorch, Transformers or MLflow download enters a consumer install.
+
+**Why Pillow and not a hand-written decoder.** The decoder refuses a truncated file, a pixel
+bomb and a file whose magic bytes contradict its extension, BEFORE the pixel buffer is
+allocated (`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:23`). That is a job for a
+battle-tested decoder, and a second decoder written here would be a second thing to keep
+correct. The heavy ML stack stays behind the extra, where it belongs.
+
+**What this amendment does not change.** The wire protocol, the ownership boundary, the
+entity rules, the compatibility rules and the hardware, security and test obligations stand
+as accepted. The frozen worker vocabulary stays exactly the ten codes it had, and the gate
+that proves it (`python/visionlens/tests/test_protocol.py:29`) still passes. The base install
+still installs no GPU or ML framework, and the metadata test that proves it
+(`python/visionlens/tests/test_build_metadata.py:16`) names the two packages the base carries.
+
+## Amendment 2026-11-14: the device planner admits the CPU only
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The CPU vision adapter of VLN-005 asks the machine where a run happens. The pack asks the
+`DevicePlanner` to check MPS availability, available memory and operator compatibility, and
+to accept a CPU fallback with a status
+(`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:61`), and it asks the CPU to be the reference path
+(`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`). The adapter of this ticket runs on the
+CPU, so the planner has to answer for a machine that has an accelerator and for one that has
+not, and the answer must be the same in the capability report and in the run.
+
+**What changes.** There is one device vocabulary and one resolver, in
+`python/visionlens/src/visionlens/runtime/device.py`:
+
+- `KNOWN_DEVICES` is every device the platform knows by name (`cpu`, `mps`, `cuda`), the
+  device support a registry record carries
+  (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`);
+- `ADMITTED_DEVICES` is the devices a run may use, in the order `auto` prefers them, and it
+  holds the CPU only;
+- `REQUESTABLE_DEVICES` is what a request may name (`auto` plus the admitted devices), and
+  the configuration reads it instead of carrying a second list
+  (`python/visionlens/src/visionlens/config.py:34`);
+- the capability report asks the planner and reads its answer, instead of resolving the
+  device on its own (`python/visionlens/src/visionlens/capabilities.py:87`).
+
+`auto` resolves to an admitted device and records why it fell back. The reason names the
+accelerators the platform knows and what the machine has of them, so a run on a Mac with MPS
+says that the machine provides MPS and that this build does not admit it. An explicit
+accelerator is refused with its reason: a request for a device this build does not run fails
+instead of running somewhere else.
+
+**What is deferred, and why.** The memory admission and the operator compatibility check the
+pack names for MPS are NOT implemented
+(`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:61`). Admitting MPS without them would claim a
+capability the platform does not have, so MPS is not admitted, and the pack's own rule
+applies: an unsupported device falls back or fails with a reason, never silently
+(`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:56`). The admission is a one-line change: when the
+memory admission and the operator check land, `ADMITTED_DEVICES` grows, `auto` prefers the
+accelerator, and the refusal disappears with it. The device names in the registry record are
+the vocabulary of the models, not a claim that this build runs them.
+
+**What this amendment does not change.** The wire protocol, the ownership boundary, the
+entity rules, the compatibility rules and the security and test obligations stand as
+accepted. The frozen worker vocabulary stays exactly the ten codes it had, and the gate that
+proves it (`python/visionlens/tests/test_protocol.py:29`) still passes. The CPU remains the
+reference path, and the recorded run of the adapter is a CPU run
+(`docs/architecture/vision-adapter.md`).
+
+## Amendment 2026-11-14: the worker runs with the network disabled
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The pack asks the worker of an isolated inference to run with the network DISABLED unless
+provider access is explicitly required, and it asks that the text of an image be treated as data
+and never as agent instruction
+(`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:31`). A worker that can reach the network can
+be turned into a client of anything that answers, and a file that carries an instruction in its
+metadata must never be able to say what the platform does.
+
+**What changes.** There is one guard of the network, and it is a property of the PROCESS rather
+than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
+
+- the guard patches the socket layer while it is installed and restores it when it is removed, so
+  it covers the threads that serve the requests and not only the thread that installed it. It
+  refuses every connection, every outbound datagram and the resolution of any name that is not
+  local, on the Python socket class and on the raw socket of the C module;
+- two gates stand between the worker and the network. The MODE of the worker: provider access has
+  to be explicitly required for this worker, and the default says it was not
+  (`python/visionlens/src/visionlens/worker.py:43`). The SCOPE: even a worker that requires
+  provider access reaches the network only inside an explicit allowance, and only for as long as
+  the scope lasts. The allowance belongs to the THREAD that opened it, so a scope never opens the
+  door for the other threads of the worker;
+- the loader of the weights opens that scope around its fetch
+  (`python/visionlens/src/visionlens/encoders/weights.py:735`), and the scope is a request and
+  not a permission: a worker that did not require provider access refuses the fetch even though
+  the loader asked for it.
+
+The limits of the guard are part of the decision and are not glossed over: it is a defense IN
+PROCESS. It does not reach a SUBPROCESS that EXECS, because an exec replaces the patched process
+with a new one, and a new one answers for itself. A FORK is another matter: it inherits the
+patched socket layer, so the child refuses the network too, and it starts with no allowance of
+its own, because the allowance of the thread that forked is not the allowance of the child. The
+guard also does not reach a RAW socket of the C module that was created before it was installed;
+a socket of the Python class that was created before is refused, because the patch lives on the
+class and the class is looked up at the moment of the call. The isolation of a worker that must
+not reach the network is the sandbox that runs it, and the guard is the defense inside that
+sandbox.
+
+The refusal is typed and belongs to the LIBRARY vocabulary, never to the frozen wire one: the code
+is `NETWORK_ACCESS_REFUSED`, and it is a new library code
+(`python/visionlens/src/visionlens/errors.py:108`). The ten frozen wire codes stay exactly the
+ten they were.
+
+The text of an image is data because the model never reads text. The input of the model is a
+tensor of numbers, and the boundary refuses a value that is not a number with the library code
+`NON_NUMERIC_PIXEL` (`python/visionlens/src/visionlens/io/preprocess.py:51`). The decoder reads
+one tag of the EXIF, the orientation, and extracts no text at all, so the pixels of a file that
+carries an instruction are the pixels of a file that carries none. It also drops the metadata
+of the picture it returns, so the text of the file does not travel with the pixels at all.
+
+**What this amendment does not change.** The wire protocol, the ownership boundary, the entity
+rules, the compatibility rules and the security and test obligations stand as accepted. The
+gates of the loader keep their order and their power: the permission, the license, the source, the
+pinned revision and the digest still decide WHAT may be fetched, and the guard only makes sure
+that the process reaches the network through one of those gates and not around them.
+
+## Amendment 2026-11-14: a run that embedded nothing is not a run
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The pack asks that every failure path leave the process alive, return ONE typed error and never
+publish a partial artifact as a success
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`). The adapter had one path that did the
+opposite: a run in which EVERY image was refused wrote an artifact with no vector in it and
+answered with a success.
+
+**What changes.** The run now fails with ONE typed error when no image could be embedded
+(`python/visionlens/src/visionlens/inference/embedder.py`):
+
+- the code is `EMBEDDING_RUN_EMPTY`, a code of the LIBRARY vocabulary and never of the frozen
+  wire one, and the ten wire codes stay exactly the ten they were;
+- the error carries the samples of the refusals, so the caller sees WHY each image was refused
+  and not only that the run was empty;
+- no artifact is written, so there is no empty artifact to be read as a success.
+
+**What does not change.** The mixed case is the one the pack asks for and it is unchanged: an
+image that cannot be decoded is an error sample, the other images still embed, and the error
+names the file (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`). The recorded run of
+the adapter is a run of six images that all embedded, and it is unchanged.
+
+**The test that changed and why.** The test
+`python/visionlens/tests/test_embed_cpu.py` asserted that a run whose images were all refused
+answered with a result of zero vectors and a list of errors. That test asserted the behaviour the
+pack forbids, so it was split in two: the mixed case keeps the error sample and the other images
+embed, and the new case asserts the typed error and the absence of an artifact. No other test
+changed, and no threshold was lowered.
+
 ## As built today
 
 | Side | Ships | Evidence |
 |---|---|---|
-| Python | the `visionlens` wheel source: simulated encoder, model registry, five operation handlers, the JSONL worker, the golden transcript and the typed facade; the base install carries Pydantic, Python `>=3.11` | `python/visionlens/pyproject.toml:10-25`, `python/visionlens/src/visionlens/golden/__init__.py:1` |
+| Python | the `visionlens` wheel source: simulated encoder, model registry, five operation handlers, the JSONL worker, the golden transcript and the typed facade; the base install carries Pydantic and Pillow, Python `>=3.11` | `python/visionlens/pyproject.toml:10-38`, `python/visionlens/src/visionlens/golden/__init__.py:1` |
+| Python | the CPU vision adapter: the decoder, the canonical preprocessing, the device planner, the SigLIP2 encoder, the content-addressed artifact and its manifest, the failure matrix, and the network guard of the worker | `python/visionlens/src/visionlens/io/decode.py:1`, `python/visionlens/src/visionlens/runtime/netguard.py:98`, `python/visionlens/tests/test_failure_modes.py:1` |
 | Python | three service skeletons as thin adapters (`SERVICE_NAME` only, no dependencies) | `services/vision/src/vision_lens_vision/__init__.py:3`, `services/vision/pyproject.toml:6` |
 | Python | the worker runtime container: the vendored wheel copy, no Node, byte-guarded | `docker/runtime/`, `scripts/check-docker-vendor.mjs:1` |
 | TypeScript | the worker host: spawn, framing, handshake, cancel ladder, deadline, budget | `packages/core/src/worker/client.ts:1` |
+| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:534` (the registry), `:407` (the typed success), `:444` (the typed error) |
 | Shared | the frozen vocabulary, defined once per language and proven identical | `packages/contracts/src/worker/protocol.ts:19`, `python/visionlens/src/visionlens/protocol.py:18` |
 | Cross-language | the real TypeScript host against the real Python worker over the wire | `packages/core/tests/worker/python-integration.test.ts:21-34` |
 
-Not implemented, and not claimed: the heavy ML stacks behind the extras, device planning
-(`DevicePlanner`, MPS and CUDA), the `@vision-lens/sdk/client` entrypoint, and any PyPI or npm
+Not implemented, and not claimed: the heavy ML stacks behind the extras (the `vision` extra
+now carries them, but no consumer install pulls them), the `@vision-lens/sdk/client`
+entrypoint, and any PyPI or npm
 publication. Those remain gated by the acceptance conditions below.
 
 ## Supersession record against ADR-006
@@ -159,7 +339,7 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
 |---|---|---|
 | CLI bins | `vision-lens` stays canonical, `ai-image-labeling` stays as an alias with a sunset policy (`docs/vnext/02-ARCHITECTURE-DECISION.md:30`) | both bins unchanged (`packages/cli/package.json:10-11`); no sunset date set yet |
 | npm SDK | root exports are kept until a versioned migration; a lightweight client is a new entrypoint, never a silent replacement (`docs/vnext/02-ARCHITECTURE-DECISION.md:31`) | exports still `.` and `./cli` (`packages/sdk/package.json:7-9`); `./client` not yet added |
-| Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:215`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
+| Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:248`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
 | Store | forward-only migrations, SQLite store preserved, not replaced (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:5`) | `packages/core/src/store/migrations/` |
 | Persisted snapshots and datasets | versioned; incompatible changes need explicit migration (`docs/vnext/02-ARCHITECTURE-DECISION.md:34`) | tracked manifests unchanged by this ADR |
 | Cross-language operations | stable operation codes, error codes and emitted metrics; English model text never decides program control (`docs/vnext/02-ARCHITECTURE-DECISION.md:35`) | frozen on both sides (`packages/contracts/src/worker/protocol.ts:64-118`) |
@@ -173,14 +353,14 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
   [all]` (`docs/vnext/02-ARCHITECTURE-DECISION.md:32`) against `vision train agents server all`
   (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:35`). As built the distribution freezes the first set,
   full words matching the service names, and rejects the `train` spelling
-  (`python/visionlens/pyproject.toml:21-25`).
+  (`python/visionlens/pyproject.toml:30-38`).
 - Python minimum 3.11, justified by the service skeletons that already declare `>=3.11`
   (`python/visionlens/pyproject.toml:10`, `services/vision/pyproject.toml:5`); 3.12 and 3.13
   enter the matrix only after the dependencies prove compatible
   (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:33`).
 - The base install carries no mandatory GPU, PyTorch, Transformers or MLflow download
-  (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:34`): it carries Pydantic and nothing else
-  (`python/visionlens/pyproject.toml:16`), as the amendment of 2026-11-14 records.
+  (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:34`): it carries Pydantic and Pillow and nothing else
+  (`python/visionlens/pyproject.toml:18`), as the amendments of 2026-11-14 record.
 - Heavy imports stay lazy and raise an actionable `MissingExtraError` naming the exact install
   command (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:35`); as built the `MISSING_EXTRA` error code
   is already frozen in the wire vocabulary (`packages/contracts/src/worker/protocol.ts:86`) and
@@ -191,7 +371,7 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
   distribution exists.
 - Pure-Python universal wheel, no bundled model checkpoints, opt-in Hugging Face downloads with
   license and SHA provenance (`docs/vnext/05-PYTHON-CORE-AND-PYPI.md:37`); the wheel target
-  ships `src/visionlens` only (`python/visionlens/pyproject.toml:27-28`).
+  ships `src/visionlens` only (`python/visionlens/pyproject.toml:40-41`).
 - Publication block: nothing is published until the registry check, the license audit, the
   README and local wheel plus sdist tests in a clean consumer install pass, and no availability
   or unclaimed-name claim is made from this repository today
@@ -204,7 +384,7 @@ These gate the first real (non-simulated) ML work; none is claimed as done.
 
 | Area | Acceptance condition | Source |
 |---|---|---|
-| Device planning | `DevicePlanner` checks MPS availability, memory and operator compatibility, accepts a CPU fallback with a status; CUDA optional, isolated in GPU workers | `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:61` |
+| Device planning | `DevicePlanner` checks MPS availability, memory and operator compatibility, accepts a CPU fallback with a status; CUDA optional, isolated in GPU workers; as built the planner admits the CPU only, refuses an accelerator this build does not run and names the accelerators the machine has, and the memory admission and the operator check are deferred (the amendment of 2026-11-14) | `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:61` |
 | Operation fallback | an unsupported operation falls back or fails with a reason, never silently changes method; hashes, split, model revision and device metadata enter every run manifest | `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:56` |
 | Scheduling | `BatchScheduler` reduces batch size on transient exhaustion with bounded attempts and explicit `resource_fallback` events | `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:63` |
 | Training | the `Trainer` checkpoints, reduces batch size or fails explicitly on MPS OOM, and never claims equivalence after a hyperparameter change; a missing calibration is `null`, never 1.0 | `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:64-66` |
@@ -223,7 +403,7 @@ Migration proof, per `docs/vnext/02-ARCHITECTURE-DECISION.md:37`:
 |---|---|
 | Dual-runtime parity on one golden inference path | partially proven: the cross-language suite runs the real TS host against the real Python worker (`packages/core/tests/worker/python-integration.test.ts:21-34`), the pack's frame examples validate in both languages (`packages/contracts/tests/worker/pack-examples.test.ts`, `python/visionlens/tests/test_pack_examples.py`), and the Python golden transcript pins one scripted session byte for byte (`python/visionlens/src/visionlens/golden/__init__.py:1`); a real-model golden path lands with the CPU vision adapter (spec 019) |
 | The old Node CLI suite stays green | unchanged by this ADR; the CLI bins and exports are untouched |
-| Python works standalone and packages into a wheel | the package builds its wheel from `src/visionlens` (`python/visionlens/pyproject.toml:27-28`); the container image consumes it (`docker/runtime/`) |
+| Python works standalone and packages into a wheel | the package builds its wheel from `src/visionlens` (`python/visionlens/pyproject.toml:40-41`); the container image consumes it (`docker/runtime/`) |
 | `@vision-lens/sdk/client` calls the application API with no Python in the JS consumer environment | not yet built; the entrypoint does not exist (`packages/sdk/package.json:7-9`) |
 
 Rollback: revert the commit that carries this ADR, the owner map and the static check. This

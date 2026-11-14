@@ -143,10 +143,12 @@ def assert_invariants(frames: Sequence[dict[str, Any]]) -> None:
 class WorkerProc:
     """A real worker subprocess driven line by line over pipes."""
 
-    def __init__(self) -> None:
+    def __init__(self, env_overrides: dict[str, str] | None = None) -> None:
         env = dict(os.environ)
         existing = env.get("PYTHONPATH")
         env["PYTHONPATH"] = str(SRC) if not existing else str(SRC) + os.pathsep + existing
+        if env_overrides:
+            env.update(env_overrides)
         self.proc = subprocess.Popen(
             [sys.executable, "-m", WORKER_MODULE],
             stdin=subprocess.PIPE,

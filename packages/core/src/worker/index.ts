@@ -52,3 +52,28 @@ export type {
   WorkerRetryPolicy,
 } from './client.js';
 export type { RetryRandom, RetryReconcile, RetryReconcileContext } from './client.js';
+
+export {
+  parseRecordedVisionEmbedSuccess,
+  parseSimulatedVisionEmbedSuccess,
+  parseVisionEmbedSuccess,
+  runVisionEmbed,
+  tryVisionEmbed,
+  VISION_EMBED_BRIDGE,
+  VISION_EMBED_DTYPE,
+  VISION_EMBED_OPERATION,
+  WORKER_OPERATION_BRIDGES,
+  WorkerOperationContractError,
+  workerErrorResult,
+} from './operations.js';
+export type {
+  RecordedVisionEmbedSuccess,
+  SimulatedVisionEmbedSuccess,
+  VisionEmbedClient,
+  VisionEmbedErrorSample,
+  VisionEmbedInput,
+  VisionEmbedSuccess,
+  WorkerOperationBridge,
+  WorkerOperationErrorResult,
+  WorkerOperationOutcome,
+} from './operations.js';
