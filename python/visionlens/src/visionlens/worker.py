@@ -255,22 +255,13 @@ class Worker:
     def run(self) -> int:
         """Serve frames until end of input or a shutdown signal; return 0.
 
-        The network is disabled for the whole of the service, unless
-        provider access was explicitly required for this worker. The guard
-        is a property of the PROCESS, so it covers the threads that serve
-        the requests too, and it is removed when the service ends.
+        The network of the PROCESS is disabled by the entry point, which
+        installs the guard around the whole service: the guard is a
+        property of the process and not of a method, so it covers the
+        threads that serve the requests too.
         """
         self._emit_hello()
-        provider_access = self._network == NETWORK_REQUIRED
-        if provider_access:
-            self._logger.info(
-                "provider access was explicitly required for this worker; the "
-                "network is reachable only inside an explicit scope"
-            )
-        else:
-            self._logger.info("the network is disabled for this worker")
-        with network_disabled(provider_access=provider_access):
-            return self._serve()
+        return self._serve()
 
     def _serve(self) -> int:
         """The serving loop, with the frames of the host."""
@@ -685,34 +676,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     def _wake() -> None:
         raise _GracefulExit("shutdown signal")
 
+    provider_access = network_mode() == NETWORK_REQUIRED
+    if provider_access:
+        LOG.info(
+            "provider access was explicitly required for this worker; the "
+            "network is reachable only inside an explicit scope"
+        )
+    else:
+        LOG.info("the network is disabled for this worker")
+
     try:
         signal.set_wakeup_fd(wake_write_fd)
         for signum in (signal.SIGTERM, signal.SIGINT):
             previous_handlers[signum] = signal.signal(signum, _on_signal)
-        worker = Worker(
-            reader=sys.stdin.buffer,
-            writer=sys.stdout.buffer,
-            wakeup_fd=wake_read_fd,
-            wake_handler=_wake,
-            shutdown_event=shutdown_event,
-            network=network_mode(),
-        )
-        try:
-            return worker.run()
-        except _GracefulExit:
-            # A signal landed outside the reader loop; daemon threads stop
-            # with the process and the host is tearing the session down.
-            return 0
-        except BrokenPipeError:
-            devnull = os.open(os.devnull, os.O_WRONLY)
-            os.dup2(devnull, sys.stdout.fileno())
-            return 0
-        finally:
+        # The guard stays installed until the process is gone: a request
+        # thread that outlived the shutdown cannot reach the network
+        # afterwards.
+        with network_disabled(provider_access=provider_access, restore=False):
+            worker = Worker(
+                reader=sys.stdin.buffer,
+                writer=sys.stdout.buffer,
+                wakeup_fd=wake_read_fd,
+                wake_handler=_wake,
+                shutdown_event=shutdown_event,
+                network=network_mode(),
+            )
             try:
-                sys.stdout.buffer.flush()
-            except Exception:
+                return worker.run()
+            except _GracefulExit:
+                # A signal landed outside the reader loop; daemon threads stop
+                # with the process and the host is tearing the session down.
+                return 0
+            except BrokenPipeError:
                 devnull = os.open(os.devnull, os.O_WRONLY)
                 os.dup2(devnull, sys.stdout.fileno())
+                return 0
+            finally:
+                try:
+                    sys.stdout.buffer.flush()
+                except Exception:
+                    devnull = os.open(os.devnull, os.O_WRONLY)
+                    os.dup2(devnull, sys.stdout.fileno())
     finally:
         signal.set_wakeup_fd(-1)
         for restored_signum, handler in previous_handlers.items():

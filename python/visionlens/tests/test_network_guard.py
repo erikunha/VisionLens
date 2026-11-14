@@ -57,6 +57,73 @@ def test_a_connection_inside_a_guarded_worker_is_refused(listener: socket.socket
     assert "outbound connection" in str(excinfo.value)
 
 
+def test_a_datagram_of_a_guarded_worker_is_refused():
+    # A UDP socket does not connect, so it would reach the network without
+    # ever touching the patched connect.
+    with network_disabled():
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            with pytest.raises(NetworkAccessRefusedError) as excinfo:
+                sock.sendto(b"payload", ("127.0.0.1", 9))
+        finally:
+            sock.close()
+
+    assert excinfo.value.code == LibraryErrorCode.NETWORK_ACCESS_REFUSED
+    assert "datagram" in str(excinfo.value)
+
+
+def test_the_raw_socket_of_the_c_module_is_refused():
+    # The raw socket is a DIFFERENT type and does not inherit the patch of
+    # the Python class, so it is replaced while the guard is installed.
+    import _socket
+
+    with network_disabled():
+        sock = _socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            with pytest.raises(NetworkAccessRefusedError):
+                sock.connect(("127.0.0.1", 9))
+        finally:
+            sock.close()
+
+
+def test_the_resolution_of_a_name_is_refused():
+    # A lookup is a query to a resolver, and a resolver is a network. The
+    # resolution of a LOCAL address is a local operation and is allowed.
+    with network_disabled():
+        with pytest.raises(NetworkAccessRefusedError) as excinfo:
+            socket.getaddrinfo("example.invalid", 443)
+
+        assert "resolution" in str(excinfo.value)
+        # The loopback still resolves: the guard does not break the local
+        # work of the process.
+        assert socket.getaddrinfo("127.0.0.1", 80)
+
+
+def test_an_allowance_belongs_to_the_thread_that_opened_it():
+    # The scope opens the door for the thread that asked for it and for
+    # nobody else, so a download never opens the network for the requests
+    # the worker is serving at the same time.
+    outcome: list[object] = []
+
+    def attempt() -> None:
+        try:
+            socket.create_connection(("127.0.0.1", 9), timeout=1)
+            outcome.append("connected")
+        except NetworkAccessRefusedError as exc:
+            outcome.append(exc)
+        except OSError as exc:
+            outcome.append(exc)
+
+    with network_disabled(provider_access=True):
+        with network_access("a scope of this thread"):
+            thread = threading.Thread(target=attempt)
+            thread.start()
+            thread.join(timeout=5)
+
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], NetworkAccessRefusedError)
+
+
 def test_the_guard_restores_the_network_when_the_scope_ends(listener: socket.socket):
     with network_disabled():
         with pytest.raises(NetworkAccessRefusedError):

@@ -788,6 +788,13 @@ def _write_stream(target: Path, blocks: Iterable[bytes]) -> Tuple[str, int, Path
         if os.path.exists(temporary):
             os.unlink(temporary)
         raise
+    finally:
+        # The source of the blocks is closed when the write ends, so a
+        # generator that holds a scope (the fetch opens one) closes that
+        # scope with it and not when the garbage collector runs.
+        close = getattr(blocks, "close", None)
+        if callable(close):
+            close()
     return digest.hexdigest(), written, Path(temporary)
 
 
