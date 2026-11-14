@@ -130,6 +130,46 @@ the preprocessed values is the same for both
 no OCR, so no text is extracted, and what is not extracted cannot be
 obeyed.
 
+## The bridge and the typed result of the operation
+
+The wire contract freezes the FRAMES and the operation codes, and it leaves
+the payload of a result to the operation: the result is free-form JSON but
+it must be stable per operation
+(`packages/contracts/src/worker/event.ts`). The bridge is where that
+stability is written down
+(`packages/core/src/worker/operations.ts:434`): for every operation it
+names the code, the params it sends, the typed success it accepts and the
+typed error it reports.
+
+The repository carries TWO shapes of the result of `vision.embed`, and both
+are tracked:
+
+| shape | who answers | what it carries |
+|---|---|---|
+| the recorded one | the adapter of this ticket | the run id, the count, the dimension, the dtype, the digest of the artifact and the error samples; the vectors are on disk |
+| the simulated one | the deterministic runtime of the frozen protocol | the model, the dimension, the dtype, the count, the vectors, the digest, the preprocessing fingerprint and the device |
+
+The pack's own example carries the recorded shape
+(`docs/vnext/contracts/proposed/examples/worker-result.example.json` and
+`packages/contracts/tests/fixtures/worker/result.golden.json`), and the
+golden transcript of the Python package pins the simulated one byte for
+byte. The bridge accepts both and NAMES which one answered, so a caller
+can never mistake a simulated vector for a recorded run, and a payload that
+is neither is a refusal and not a guess.
+
+The typed error carries the frozen code, the message and the frozen
+retryable flag of that code, read from the frozen table and never guessed
+(`packages/core/src/worker/operations.ts:399`). A failure of the CHANNEL
+(the process did not start, the deadline elapsed) is reported with the code
+that names it, because the frozen vocabulary has no other code for it and
+the bridge never invents one.
+
+The validators of the bridge are written by hand instead of with Zod,
+because the owner boundary of `packages/core/src/worker/` allows the Node
+stdlib, the contracts package, that directory and `packages/core/src/utils/`,
+and nothing else. A boundary that is widened for a convenience is a
+boundary that is not enforced.
+
 ## The golden parity gate
 
 One golden file, read by both languages, and a gate that compares three
