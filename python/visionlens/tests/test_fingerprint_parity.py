@@ -155,6 +155,22 @@ def test_python_reproduces_the_typescript_digests(
     assert fp2_of(payload) == fp2
 
 
+def test_a_big_integer_is_written_the_way_javascript_writes_it() -> None:
+    # JavaScript writes a number whose decimal exponent is at least 21 in
+    # the exponential form, and Python writes an integer in full. The two
+    # sides of a fingerprint have to write the SAME text, or the same
+    # content has two digests. The literals came from the live TypeScript
+    # canonicalJson and fingerprintV2, with the same payload.
+    payload = {
+        "big": 1000000000000000000000,
+        "bigger": 10000000000000000000000,
+        "small": 7,
+    }
+
+    assert canonical_json(payload) == '{"big":1e+21,"bigger":1e+22,"small":7}'
+    assert fp2_of(payload) == "fp2:b9731da4f2f2d670"
+
+
 def test_object_key_order_does_not_change_the_digest() -> None:
     reordered = {key: FINGERPRINT_INPUT[key] for key in reversed(list(FINGERPRINT_INPUT))}
     assert digest_of(reordered) == digest_of(FINGERPRINT_INPUT)

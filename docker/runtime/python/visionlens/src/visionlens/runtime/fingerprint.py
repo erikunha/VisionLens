@@ -54,6 +54,12 @@ def _serialize(value: Any) -> str:
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, int):
+        # JavaScript writes a number whose decimal exponent is at least 21
+        # in the exponential form, and Python writes an integer in full.
+        # The two sides of a fingerprint have to write the SAME text, so
+        # a big integer goes through the rule of the numbers.
+        if abs(value) >= 10 ** 21:
+            return _number(float(value))
         return str(value)
     if isinstance(value, float):
         return _number(value)
