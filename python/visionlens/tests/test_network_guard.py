@@ -11,7 +11,10 @@ the network by itself.
 
 from __future__ import annotations
 
+import os
 import socket
+import subprocess
+import sys
 import threading
 from typing import Iterator
 
@@ -122,6 +125,53 @@ def test_an_allowance_belongs_to_the_thread_that_opened_it():
 
     assert len(outcome) == 1
     assert isinstance(outcome[0], NetworkAccessRefusedError)
+
+
+def test_a_forked_child_inherits_the_guard_and_not_the_allowance():
+    # A fork inherits the patched socket layer, so the child refuses the
+    # network too. What it does NOT inherit is the allowance of the thread
+    # that forked: the allowance of the parent is not a permission of the
+    # child, and a child that could reach the network would be a way out
+    # of the guard for every worker that forks.
+    #
+    # The fork happens in a PROCESS OF ITS OWN: forking a process that has
+    # threads is a deadlock waiting to happen, and the property to prove
+    # is about the guard and not about the test runner.
+    script = """
+import os, socket, sys
+sys.path.insert(0, {src!r})
+from visionlens.runtime.netguard import network_access, network_disabled
+
+read_fd, write_fd = os.pipe()
+with network_disabled(provider_access=True):
+    with network_access("a scope of this thread"):
+        pid = os.fork()
+        if pid == 0:
+            os.close(read_fd)
+            try:
+                socket.create_connection(("127.0.0.1", 9), timeout=1)
+                os.write(write_fd, b"connected")
+            except Exception as exc:
+                os.write(write_fd, type(exc).__name__.encode())
+            os.close(write_fd)
+            os._exit(0)
+        os.close(write_fd)
+        reported = os.read(read_fd, 64)
+        os.close(read_fd)
+        os.waitpid(pid, 0)
+sys.stdout.write(reported.decode())
+""".format(src=str(SRC))
+
+    finished = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    # The port 9 refuses the connection by itself, so the name of the
+    # error is what tells the guard apart from the operating system.
+    assert finished.stdout.strip() == "NetworkAccessRefusedError"
 
 
 def test_the_guard_restores_the_network_when_the_scope_ends(listener: socket.socket):

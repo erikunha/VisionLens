@@ -37,11 +37,18 @@ It refuses, inside this process:
 
 It does NOT reach:
 
-  - a CHILD PROCESS. A fork or a subprocess leaves the patched process
-    and answers for itself. The isolation of a worker that must not
-    reach the network is the sandbox that runs it, and the guard is the
-    in-process defense inside that sandbox;
-  - a socket object that was created BEFORE the guard was installed.
+  - a SUBPROCESS that EXECs. An exec replaces the patched process with a
+    new one, and the new one answers for itself. A FORK is another
+    matter: it inherits the patched socket layer, so the child refuses
+    the network too, and it starts with no allowance of its own because
+    the allowance of the thread that forked is not the allowance of the
+    child. The isolation of a worker that must not reach the network is
+    the sandbox that runs it, and the guard is the in-process defense
+    inside that sandbox;
+  - a RAW socket of the C module that was created BEFORE the guard was
+    installed. A socket of the Python class that was created before is
+    refused, because the patch lives on the class and the class is
+    looked up at the moment of the call.
 
 Nothing here decides WHAT may be fetched. That decision belongs to the
 gates of the loader: the license, the permission, the allowlist, the
@@ -178,11 +185,21 @@ class NetworkGuard:
         """Refuse the network for the duration of the scope."""
         undo = self._apply_patch()
         self._installed = True
+        # The guard joins the list of the installed ones, so the handler
+        # of the fork resets it in the child. The list and the patch are
+        # kept together on purpose: a guard whose patch is installed and
+        # whose allowance survives a fork is a guard that a child of the
+        # worker inherits with the door open.
+        _INSTALLED.append(self)
         try:
             yield
         finally:
             undo()
             self._installed = False
+            try:
+                _INSTALLED.remove(self)
+            except ValueError:  # pragma: no cover - the guard was removed already
+                pass
 
     def _apply_patch(self) -> Any:
         """Patch the socket layer, and return the undo of the patch.
@@ -283,6 +300,26 @@ class NetworkGuard:
         self._reasons = []
 
 
+#: The guards whose patch is installed in this process.
+_INSTALLED: list[NetworkGuard] = []
+
+
+def _reset_installed_guards_after_fork() -> None:
+    """Reset the state of every installed guard in the child of a fork.
+
+    A fork inherits the patch of the socket layer, so the child refuses
+    the network too, but the allowance of the thread that forked is not
+    the allowance of the child: the child starts with none. The handler
+    is registered once, at the import of the module, so every guard that
+    is installed later is covered by it, and no handler accumulates.
+    """
+    for guard in list(_INSTALLED):
+        guard.after_fork_in_child()
+
+
+os.register_at_fork(after_in_child=_reset_installed_guards_after_fork)
+
+
 class _RefusingSocket(_socket.socket):
     """The raw socket of the C module, with its outbound calls refused.
 
@@ -360,9 +397,6 @@ def network_disabled(
     guard = NetworkGuard(provider_access=provider_access)
     previous = _ACTIVE
     _ACTIVE = guard
-    # A fork inherits the patch and nothing else: the child of a fork
-    # starts with no allowance and with a lock of its own.
-    os.register_at_fork(after_in_child=guard.after_fork_in_child)
     try:
         with guard.install():
             yield guard
