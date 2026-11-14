@@ -7,7 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { commitEmbeddingRun, embeddingTransform } from '../../src/adapter/embedding-commit.js';
 import { embeddingContentDigest } from '../../src/adapter/embedding-manifest.js';
 import { DatasetRegistrySchema } from '../../src/benchmark/registry.js';
-import { assetFixture, createTestStore, FAKE_SHA256 } from '../store/helpers.js';
+import {
+  assetFixture,
+  createTestStore,
+  FAKE_SHA256,
+  ontologyFixture,
+  snapshotFixture,
+} from '../store/helpers.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -225,7 +231,8 @@ describe('the single-writer commit of an embedding run', () => {
 
   it('commits the same content once, and a second commit writes no second row', async () => {
     // The pack asks that a transaction across repositories uses an
-    // idempotency key: the key here is the content itself.
+    // idempotency key: the key here is the kind, the transform, the
+    // fingerprint, the snapshot and the ordered sources.
     const store = await createTestStore();
     try {
       store.repos.assets.insert(assetFixture({ sha256: FAKE_SHA256 }));
@@ -246,6 +253,42 @@ describe('the single-writer commit of an embedding run', () => {
       if (!first.ok || !second.ok) return;
       expect(second.artifact.id).toBe(first.artifact.id);
       expect(store.repos.derivedArtifacts.listByEncoder(first.modelVersionId)).toHaveLength(1);
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  it('commits another snapshot of the same assets as another row', async () => {
+    // The snapshot is part of the key: two runs of the same assets under
+    // two snapshots are two facts, and the key that would collapse them
+    // would lose one of them.
+    const store = await createTestStore();
+    try {
+      store.repos.assets.insert(assetFixture({ sha256: FAKE_SHA256 }));
+      const ontology = store.repos.ontology.insert(ontologyFixture());
+      const first = store.repos.snapshots.insert(
+        snapshotFixture({ ontologyVersionId: ontology.id }),
+      );
+      const second = store.repos.snapshots.insert(
+        snapshotFixture({ ontologyVersionId: ontology.id }),
+      );
+
+      const one = commitEmbeddingRun({
+        manifest: manifestFixture({ snapshotId: first.id }),
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+      const two = commitEmbeddingRun({
+        manifest: manifestFixture({ snapshotId: second.id }),
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+
+      expect(one.ok).toBe(true);
+      expect(two.ok).toBe(true);
+      if (!one.ok || !two.ok) return;
+      expect(two.artifact.id).not.toBe(one.artifact.id);
+      expect(store.repos.derivedArtifacts.listByEncoder(one.modelVersionId)).toHaveLength(2);
     } finally {
       store.cleanup();
     }

@@ -50,7 +50,13 @@ export class WorkerProtocolError extends Error {
     this.name = 'WorkerProtocolError';
     this.code = code;
     this.violation = violation;
-    this.retryable = WORKER_ERROR_RETRYABLE[code];
+    // The frozen table is checked with `hasOwn` and not with a lookup: a
+    // lookup finds the members of the prototype chain too, so a code
+    // named `toString` would inherit the function of the chain instead
+    // of the flag of a frozen code.
+    this.retryable = Object.hasOwn(WORKER_ERROR_RETRYABLE, code)
+      ? WORKER_ERROR_RETRYABLE[code]
+      : false;
   }
 }
 

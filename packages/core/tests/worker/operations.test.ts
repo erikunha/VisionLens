@@ -297,6 +297,40 @@ describe('the vision.embed bridge', () => {
     }
   });
 
+  it('refuses a count and a dimension of zero, because a run embeds at least one image', () => {
+    // The producer refuses a run that embedded nothing, so a result that
+    // counts zero contradicts the very run it claims to answer.
+    for (const payload of [
+      { ...SIMULATED_PAYLOAD, count: 0 },
+      { ...SIMULATED_PAYLOAD, dimension: 0 },
+      { ...RECORDED_PAYLOAD, count: 0 },
+      { ...RECORDED_PAYLOAD, dimensions: 0 },
+    ]) {
+      try {
+        parseVisionEmbedSuccess(payload);
+        expect.unreachable('the payload should have been refused');
+      } catch (error) {
+        expect(['count', 'dimension', 'dimensions']).toContain(
+          (error as WorkerOperationContractError).field,
+        );
+      }
+    }
+  });
+
+  it('refuses a payload that names both shapes in the parser of each shape', () => {
+    // The two parsers of a shape are exported, so the exclusivity of the
+    // shapes has to hold in each of them and not only in the parser that
+    // chooses between them.
+    for (const parse of [parseRecordedVisionEmbedSuccess, parseSimulatedVisionEmbedSuccess]) {
+      try {
+        parse({ ...SIMULATED_PAYLOAD, ...RECORDED_PAYLOAD });
+        expect.unreachable('the payload should have been refused');
+      } catch (error) {
+        expect((error as WorkerOperationContractError).field).toBe('result');
+      }
+    }
+  });
+
   it('accepts the recorded payload of the pack example, which carries no error sample', () => {
     // The pack's own example of a successful result carries no error
     // sample, so the bridge accepts it and reads the samples as none.
@@ -372,6 +406,22 @@ describe('the vision.embed bridge', () => {
     expect(outcome.code).toBe('WORKER_CRASHED');
     expect(outcome.retryable).toBe(true);
     expect(outcome.message).toContain('NOT_A_FROZEN_CODE');
+  });
+
+  it('reports a code of the prototype chain as a crash of the worker', () => {
+    // The frozen table is a plain object, so a lookup finds the members
+    // of the prototype chain too. A code named `toString` would inherit
+    // the function of the chain, and a flag that is a function is a flag
+    // nobody can act on.
+    for (const code of ['toString', 'constructor', 'valueOf', '__proto__', 'hasOwnProperty']) {
+      const outcome = workerErrorResult(
+        new WorkerProtocolError(code as never, 'the worker named a code of the chain'),
+      );
+
+      expect(outcome.code).toBe('WORKER_CRASHED');
+      expect(outcome.retryable).toBe(true);
+      expect(outcome.message).toContain(code);
+    }
   });
 
   it('throws for a payload that breaks the contract, even in the tolerant call', async () => {

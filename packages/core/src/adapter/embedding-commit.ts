@@ -22,12 +22,20 @@ import { validateEmbeddingManifest, embeddingContentDigest } from './embedding-m
  * registry does not record, a manifest of another revision, and an asset
  * the store does not know are five refusals and no row.
  *
- * The commit is IDEMPOTENT: the same content committed twice returns the
- * row the first commit wrote and writes no second one. The pack asks that
- * a transaction across repositories uses an idempotency key
- * (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`), and the key here
- * is the content itself: the kind, the transform, the fingerprint of the
- * preprocessing and the ordered sources.
+ * The commit is IDEMPOTENT: the same key committed twice returns the row
+ * the first commit wrote and writes no second one. The pack asks that a
+ * transaction across repositories uses an idempotency key
+ * (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`), and the key here is
+ * the kind, the transform, the fingerprint of the preprocessing, the
+ * snapshot and the ordered sources.
+ *
+ * The limit of the key is declared: the store keeps no column for the
+ * address of the content, so the row is a record of the KEY and not of the
+ * bytes. The checksum of the content is verified before the commit, and it
+ * is the content that the key names; two runs of the same key that produced
+ * different bytes are the same row, and the store cannot tell them apart.
+ * That is a property of the schema of the table, and a schema is not
+ * changed by a ticket that does not own it.
  *
  * The registry is the switch: a model that is not in
  * `datasets/registry.json` cannot be committed, so removing the entry
@@ -168,6 +176,8 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
   });
 
   const transform = embeddingTransform(record.modelId, record.revision);
+  const snapshot = input.repositories.snapshots.getById(manifest.snapshotId);
+  const snapshotId = snapshot?.id;
   const committed = input.repositories.derivedArtifacts
     .listByEncoder(modelVersion.id)
     .find(
@@ -175,13 +185,14 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
         candidate.kind === EMBEDDING_ARTIFACT_KIND &&
         candidate.transform === transform &&
         candidate.transformFingerprint === manifest.preprocessingFingerprint &&
+        candidate.sourceSnapshotId === snapshotId &&
         candidate.sourceAssetIds.length === sourceAssetIds.length &&
         candidate.sourceAssetIds.every((id, index) => id === sourceAssetIds[index]),
     );
   if (committed !== undefined) {
-    // The same content was already committed. The commit is idempotent:
-    // it returns the row the first commit wrote and writes no second one,
-    // because two rows would be two truths about the same content.
+    // The same key was already committed. The commit is idempotent: it
+    // returns the row the first commit wrote and writes no second one,
+    // because two rows would be two truths about the same key.
     return {
       ok: true,
       artifact: committed,
@@ -190,7 +201,6 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
     };
   }
 
-  const snapshot = input.repositories.snapshots.getById(manifest.snapshotId);
   const artifact = input.repositories.derivedArtifacts.insert(
     {
       id: newId(),

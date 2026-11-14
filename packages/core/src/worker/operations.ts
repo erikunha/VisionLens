@@ -351,16 +351,38 @@ function requireErrorSamples(
 // ----------------------------------------------------------------------
 
 /**
+ * Refuses a payload that claims to be a recorded run and a simulated one at
+ * the same time.
+ *
+ * A payload that carries BOTH markers claims two shapes at once. A worker
+ * that answers with the vectors of a simulation under the name of a recorded
+ * run would have its vectors dropped and the caller told to look on the
+ * disk, so the payload is refused instead of believed.
+ */
+function refuseBothShapes(record: Record<string, unknown>): void {
+  const recorded = record.embeddingRunId !== undefined;
+  const simulated = record.vectors !== undefined;
+  if (!recorded || !simulated) return;
+  throw new WorkerOperationContractError(
+    VISION_EMBED_OPERATION,
+    'result',
+    'the result of vision.embed carries the markers of BOTH shapes ' +
+      '(embeddingRunId and vectors), and a result that claims both is refused',
+  );
+}
+
+/**
  * Parses the RECORDED shape: the run id, the count, the dimension, the
  * dtype, the digest of the artifact and the error samples.
  */
 export function parseRecordedVisionEmbedSuccess(result: unknown): RecordedVisionEmbedSuccess {
   const record = asRecord(result);
+  refuseBothShapes(record);
   return {
     kind: 'recorded',
     embeddingRunId: requireString(record, 'embeddingRunId'),
-    count: requireInteger(record, 'count'),
-    dimensions: requireInteger(record, 'dimensions'),
+    count: requireInteger(record, 'count', 1),
+    dimensions: requireInteger(record, 'dimensions', 1),
     dtype: requireDtype(record),
     artifactSha256: requireDigest(record, 'artifactSha256'),
     errorSamples: requireErrorSamples(record),
@@ -374,6 +396,7 @@ export function parseRecordedVisionEmbedSuccess(result: unknown): RecordedVision
  */
 export function parseSimulatedVisionEmbedSuccess(result: unknown): SimulatedVisionEmbedSuccess {
   const record = asRecord(result);
+  refuseBothShapes(record);
   const fallbackReason = record.fallbackReason;
   if (fallbackReason !== undefined && typeof fallbackReason !== 'string') {
     throw new WorkerOperationContractError(
@@ -387,7 +410,7 @@ export function parseSimulatedVisionEmbedSuccess(result: unknown): SimulatedVisi
     model: requireString(record, 'model'),
     dimension: requireInteger(record, 'dimension', 1),
     dtype: requireDtype(record),
-    count: requireInteger(record, 'count'),
+    count: requireInteger(record, 'count', 1),
     vectors: requireVectors(record, requireInteger(record, 'dimension', 1)),
     artifactSha256: requireDigest(record, 'artifactSha256'),
     preprocessingFingerprint: requireFingerprint(record, 'preprocessingFingerprint'),
@@ -402,25 +425,14 @@ export function parseSimulatedVisionEmbedSuccess(result: unknown): SimulatedVisi
  *
  * The two shapes are told apart by the run id: a payload that names one is
  * a recorded run, and a payload that carries vectors is a simulated one. A
- * payload that is neither is a refusal, not a guess.
+ * payload that is neither is a refusal, not a guess, and a payload that
+ * claims both is a refusal too.
  */
 export function parseVisionEmbedSuccess(result: unknown): VisionEmbedSuccess {
   const record = asRecord(result);
-  const recorded = 'embeddingRunId' in record;
-  const simulated = 'vectors' in record;
-  if (recorded && simulated) {
-    // A payload that carries BOTH markers claims to be a recorded run and
-    // a simulated one at the same time. A worker that answers with the
-    // vectors of a simulation under the name of a recorded run would
-    // have its vectors dropped and the caller told to look on the disk,
-    // so the payload is refused instead of believed.
-    throw new WorkerOperationContractError(
-      VISION_EMBED_OPERATION,
-      'result',
-      'the result of vision.embed carries the markers of BOTH shapes ' +
-        '(embeddingRunId and vectors), and a result that claims both is refused',
-    );
-  }
+  const recorded = record.embeddingRunId !== undefined;
+  const simulated = record.vectors !== undefined;
+  refuseBothShapes(record);
   if (recorded) return parseRecordedVisionEmbedSuccess(record);
   if (simulated) return parseSimulatedVisionEmbedSuccess(record);
   throw new WorkerOperationContractError(
@@ -446,10 +458,11 @@ export function workerErrorResult(failure: unknown): WorkerOperationErrorResult 
     // The code travels on the wire, so it is checked against the frozen
     // vocabulary before it is believed: a code the platform does not
     // know has no retryable flag, and a result with no flag is not a
-    // result the caller can act on.
-    const frozen = WORKER_ERROR_RETRYABLE as Record<string, boolean | undefined>;
-    const retryable = frozen[failure.code];
-    if (retryable === undefined) {
+    // result the caller can act on. The table is checked with `hasOwn`
+    // and not with a lookup, because a lookup finds the members of the
+    // prototype chain too, and a code named `toString` would inherit
+    // the function of the chain instead of the flag of a frozen code.
+    if (!Object.hasOwn(WORKER_ERROR_RETRYABLE, failure.code)) {
       return {
         code: 'WORKER_CRASHED',
         message:
@@ -461,7 +474,7 @@ export function workerErrorResult(failure: unknown): WorkerOperationErrorResult 
     return {
       code: failure.code,
       message: failure.message,
-      retryable,
+      retryable: WORKER_ERROR_RETRYABLE[failure.code],
     };
   }
   if (failure instanceof WorkerDeadlineError) {
