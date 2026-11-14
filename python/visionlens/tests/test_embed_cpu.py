@@ -21,7 +21,11 @@ import pytest
 from helpers import SRC  # noqa: F401  (path setup)
 
 from visionlens.encoders.base import EncoderOutput
-from visionlens.errors import ImageMetadataUnreadableError
+from visionlens.errors import (
+    EmbeddingRunEmptyError,
+    ImageMetadataUnreadableError,
+    LibraryErrorCode,
+)
 from visionlens.inference.artifact import (
     MANIFEST_SCHEMA_VERSION,
     UNKNOWN,
@@ -362,10 +366,64 @@ def test_the_decoder_refuses_a_corrupt_image_before_the_run(tmp_path: Path):
         service.decode(broken)
 
 
+def _spec_that_refuses_the_first_image() -> PreprocessingSpec:
+    """A spec that refuses the FIRST image and preprocesses the others.
+
+    The refusal of the preprocessing is per image, so the case of an image
+    that the preprocessing refuses and the case of a run where EVERY image
+    was refused are two different cases, and they are two different tests.
+    """
+    calls = {"count": 0}
+
+    class _BrokenSpec(PreprocessingSpec):
+        def apply(self, image: Any) -> Any:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise ValueError("the normalization of this platform has three channels")
+            return PreprocessingSpec.apply(self, image)
+
+    return _BrokenSpec(
+        height=8,
+        width=8,
+        interpolation="bilinear",
+        rescale_factor=1.0 / 255.0,
+        mean=(0.5, 0.5, 0.5),
+        std=(0.5, 0.5, 0.5),
+    )
+
+
 def test_an_image_the_preprocessing_refuses_is_an_error_sample(tmp_path: Path):
     # The preprocessing can refuse the pixels of an image that decoded
     # fine. The image is an error sample and the other images still embed:
     # a broken file never takes the run down with it.
+    embedder = VisionEmbedder(
+        record=_record(),
+        encoder=_StubEncoder(),
+        spec=_spec_that_refuses_the_first_image(),
+        decoder=DecodeService(FIXTURES_DIR),
+        device=DevicePlanner({"cpu": True}).plan("cpu"),
+        artifact_root=tmp_path / "artifacts-root",
+        snapshot_id="snapshot-test",
+    )
+
+    result = embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
+
+    assert len(result.errors) == 1
+    assert result.count == len(_assets()) - 1
+    assert result.errors[0].code == "IMAGE_METADATA_UNREADABLE"
+    assert "three channels" in result.errors[0].message
+
+
+def test_a_run_where_every_image_was_refused_fails_and_publishes_nothing(
+    tmp_path: Path,
+):
+    # The other side of the case above: a run that embedded NOTHING has no
+    # artifact to publish, so it fails with ONE typed error instead of
+    # answering with a success that carries no vector
+    # (docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26). The behaviour
+    # changed on 2026-11-14 with story 4 of the CPU vision adapter: the
+    # test that asserted the empty success asserted a partial artifact
+    # published as a success.
     class _BrokenSpec(PreprocessingSpec):
         def apply(self, image: Any) -> Any:
             raise ValueError("the normalization of this platform has three channels")
@@ -387,12 +445,14 @@ def test_an_image_the_preprocessing_refuses_is_an_error_sample(tmp_path: Path):
         snapshot_id="snapshot-test",
     )
 
-    result = embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
+    with pytest.raises(EmbeddingRunEmptyError) as excinfo:
+        embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
 
-    assert len(result.errors) == len(_assets())
-    assert result.count == 0
-    assert result.errors[0].code == "IMAGE_METADATA_UNREADABLE"
-    assert "three channels" in result.errors[0].message
+    assert excinfo.value.code == LibraryErrorCode.EMBEDDING_RUN_EMPTY
+    assert len(excinfo.value.samples) == len(_assets())
+    assert excinfo.value.samples[0][1] == "IMAGE_METADATA_UNREADABLE"
+    # The run published nothing.
+    assert not (tmp_path / "artifacts-root").exists()
 
 
 def test_a_typed_failure_of_the_library_keeps_its_own_code(tmp_path: Path):

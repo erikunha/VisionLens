@@ -34,6 +34,7 @@ picks the code):
 from __future__ import annotations
 
 import enum
+from typing import Sequence
 
 
 class ErrorCode(str, enum.Enum):
@@ -95,6 +96,7 @@ class LibraryErrorCode(str, enum.Enum):
     CLIENT_CLOSED = "CLIENT_CLOSED"
     CONFIG_INVALID = "CONFIG_INVALID"
     CONFIG_VERSION_UNSUPPORTED = "CONFIG_VERSION_UNSUPPORTED"
+    EMBEDDING_RUN_EMPTY = "EMBEDDING_RUN_EMPTY"
     IMAGE_DIMENSIONS_EXCEEDED = "IMAGE_DIMENSIONS_EXCEEDED"
     EXTRA_NOT_INSTALLED = "EXTRA_NOT_INSTALLED"
     IMAGE_METADATA_UNREADABLE = "IMAGE_METADATA_UNREADABLE"
@@ -141,6 +143,25 @@ class ConfigVersionUnsupportedError(LibraryError):
 
     def __init__(self, message: str) -> None:
         super().__init__(LibraryErrorCode.CONFIG_VERSION_UNSUPPORTED, message)
+
+
+class EmbeddingRunEmptyError(LibraryError):
+    """No image of the run could be embedded.
+
+    A run in which every image was refused has nothing to publish, so the
+    run FAILS with this error instead of writing an empty artifact and
+    answering with a success that carries no vector
+    (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`).
+
+    The samples of the refusals travel with the error, so the caller sees
+    WHY each image was refused and not only that the run was empty.
+    """
+
+    def __init__(
+        self, message: str, samples: Sequence[tuple[str, str]] = ()
+    ) -> None:
+        super().__init__(LibraryErrorCode.EMBEDDING_RUN_EMPTY, message)
+        self.samples = tuple(samples)
 
 
 class ImageDimensionsExceededError(LibraryError):

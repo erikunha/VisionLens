@@ -111,7 +111,7 @@ network:
   (`python/visionlens/src/visionlens/runtime/netguard.py:143`).
 
 The loader of the weights opens that scope around its fetch
-(`python/visionlens/src/visionlens/encoders/weights.py:719`), and the
+(`python/visionlens/src/visionlens/encoders/weights.py:720`), and the
 scope is a request and not a permission: in a worker that did not require
 provider access, the fetch is refused by the guard even though the loader
 asked for it. The gates of the loader (the permission, the license, the
@@ -169,6 +169,41 @@ because the owner boundary of `packages/core/src/worker/` allows the Node
 stdlib, the contracts package, that directory and `packages/core/src/utils/`,
 and nothing else. A boundary that is widened for a convenience is a
 boundary that is not enforced.
+
+## The failure matrix
+
+Every failure of the adapter is ONE typed error of the library vocabulary,
+the process stays alive, and no failure publishes a partial artifact as a
+success (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`). The matrix
+below is that promise, one row at a time, and every row has a test
+(`python/visionlens/tests/test_failure_modes.py`).
+
+| what fails | what is refused | the code |
+|---|---|---|
+| the path | a traversal and a symlink that escapes the approved root | `PATH_OUTSIDE_ROOT` |
+| the magic bytes | a file whose bytes contradict the name of the file | `MIME_MISMATCH` |
+| the completeness | a truncated JPEG and a truncated PNG | `IMAGE_METADATA_UNREADABLE` |
+| the caps | a declared size over the caps, read before the pixels exist | `IMAGE_DIMENSIONS_EXCEEDED` |
+| the weights | a download that nobody permitted | `PERMISSION_MISSING` |
+| the digest | bytes that carry another digest, and the refusal names both | `DIGEST_MISMATCH` |
+| the format | a `.pt` or a pickled checkpoint | `UNSAFE_FORMAT` |
+| the device | an accelerator this build does not run | `UNSUPPORTED_DEVICE` |
+| the memory | a batch that never fits, after a bounded back off | `RESOURCE_EXHAUSTED` |
+| the run | a run in which EVERY image was refused | `EMBEDDING_RUN_EMPTY` |
+
+The last row is the one that changed the behavior of the adapter on
+2026-11-14. A run in which every image was refused used to write an empty
+artifact and answer with a success that carried no vector. A run that
+embedded nothing is not a run: it fails with ONE typed error, which
+carries the samples of the refusals, and it writes nothing. The mixed case
+is unchanged and is the one the pack asks for: an image that cannot be
+decoded is an error sample, the other images still embed, and the error
+names the file
+(`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`).
+
+The codes of the matrix are the LIBRARY vocabulary and never the frozen
+wire one. The ten wire codes stay exactly the ten they were, and a
+library code never crosses the wire.
 
 ## The golden parity gate
 

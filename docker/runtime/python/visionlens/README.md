@@ -182,6 +182,11 @@ exhausts the memory budget is retried with fewer images a bounded
 number of times, and the back off is an event that names the old and
 the new batch size.
 
+A run in which EVERY image was refused has nothing to publish, so it
+fails with the typed error `EMBEDDING_RUN_EMPTY`, which carries the
+samples of the refusals, and it writes no artifact: a run that embedded
+nothing is not a run, and an empty artifact is not a success.
+
 The text of an image is data and never an instruction. The decoder reads
 the orientation tag of the EXIF and extracts no text at all, and the input
 of the model is numbers only: a value that is not a pixel is refused at

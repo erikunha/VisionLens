@@ -8,7 +8,11 @@ vectors are in the artifact, in a binary file, beside the manifest that
 describes them (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`).
 
 An image that cannot be decoded is an error sample and not a failed
-run: the other images still embed, and the error names the file.
+run: the other images still embed, and the error names the file. A run in
+which EVERY image was refused has nothing to publish, so it fails with one
+typed error and writes no artifact: a run that embedded nothing is not a
+run, and an empty artifact is not a success
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`).
 
 The Python side writes no domain row. It emits a versioned manifest for
 the TypeScript side to validate and commit
@@ -24,7 +28,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Sequence, Tuple
 
 from ..encoders.base import Encoder, EncoderOutput
-from ..errors import LibraryError, LibraryErrorCode
+from ..errors import EmbeddingRunEmptyError, LibraryError, LibraryErrorCode
 from ..io.decode import DecodeService
 from ..io.preprocess import PreprocessingSpec
 from ..registry.record import ModelRecord
@@ -176,9 +180,23 @@ class VisionEmbedder:
             prepared.append((asset, preprocessed))
 
         vectors: list[Tuple[float, ...]] = []
+        samples = tuple((error.asset_id, error.code) for error in errors)
         if prepared:
             output = self._embed_in_batches(prepared, latencies, fallbacks)
             vectors = list(output.vectors)
+        elif errors:
+            # Every image of the run was refused, so the run has nothing to
+            # publish. A run that embedded nothing is not a run: it fails
+            # with ONE typed error and writes no artifact, instead of
+            # answering with a success that carries no vector
+            # (docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26).
+            raise EmbeddingRunEmptyError(
+                "no image of the run could be embedded: "
+                + ", ".join(
+                    asset_id + " (" + code + ")" for asset_id, code in samples
+                ),
+                samples=samples,
+            )
         asset_digests = tuple(digests)
 
         manifest = EmbeddingRunManifest(

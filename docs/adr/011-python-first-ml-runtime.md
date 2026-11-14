@@ -239,7 +239,7 @@ than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
 
 The refusal is typed and belongs to the LIBRARY vocabulary, never to the frozen wire one: the code
 is `NETWORK_ACCESS_REFUSED`, and it is a new library code
-(`python/visionlens/src/visionlens/errors.py:106`). The ten frozen wire codes stay exactly the
+(`python/visionlens/src/visionlens/errors.py:108`). The ten frozen wire codes stay exactly the
 ten they were.
 
 The text of an image is data because the model never reads text. The input of the model is a
@@ -253,6 +253,38 @@ rules, the compatibility rules and the security and test obligations stand as ac
 gates of the loader keep their order and their power: the permission, the license, the source, the
 pinned revision and the digest still decide WHAT may be fetched, and the guard only makes sure
 that the process reaches the network through one of those gates and not around them.
+
+## Amendment 2026-11-14: a run that embedded nothing is not a run
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The pack asks that every failure path leave the process alive, return ONE typed error and never
+publish a partial artifact as a success
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`). The adapter had one path that did the
+opposite: a run in which EVERY image was refused wrote an artifact with no vector in it and
+answered with a success.
+
+**What changes.** The run now fails with ONE typed error when no image could be embedded
+(`python/visionlens/src/visionlens/inference/embedder.py`):
+
+- the code is `EMBEDDING_RUN_EMPTY`, a code of the LIBRARY vocabulary and never of the frozen
+  wire one, and the ten wire codes stay exactly the ten they were;
+- the error carries the samples of the refusals, so the caller sees WHY each image was refused
+  and not only that the run was empty;
+- no artifact is written, so there is no empty artifact to be read as a success.
+
+**What does not change.** The mixed case is the one the pack asks for and it is unchanged: an
+image that cannot be decoded is an error sample, the other images still embed, and the error
+names the file (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`). The recorded run of
+the adapter is a run of six images that all embedded, and it is unchanged.
+
+**The test that changed and why.** The test
+`python/visionlens/tests/test_embed_cpu.py` asserted that a run whose images were all refused
+answered with a result of zero vectors and a list of errors. That test asserted the behaviour the
+pack forbids, so it was split in two: the mixed case keeps the error sample and the other images
+embed, and the new case asserts the typed error and the absence of an artifact. No other test
+changed, and no threshold was lowered.
 
 ## As built today
 
