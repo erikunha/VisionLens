@@ -99,7 +99,7 @@ text of an image is DATA and never an instruction
 The network is a property of the PROCESS, not of a function. The guard
 patches the socket layer while it is installed and restores it when it is
 removed, so it covers the threads that serve the requests too
-(`python/visionlens/src/visionlens/runtime/netguard.py:91`). It refuses
+(`python/visionlens/src/visionlens/runtime/netguard.py:98`). It refuses
 every connection, every outbound datagram and the resolution of any name
 that is not local, on the Python socket class and on the raw socket of the
 C module, and every refusal is the typed error `NETWORK_ACCESS_REFUSED`.
@@ -114,17 +114,23 @@ Two gates stand between the worker and the network:
 - the SCOPE: even a worker that requires provider access reaches the
   network only inside an explicit allowance, and only for as long as the
   scope lasts
-  (`python/visionlens/src/visionlens/runtime/netguard.py:326`). The
+  (`python/visionlens/src/visionlens/runtime/netguard.py:363`). The
   allowance belongs to the THREAD that opened it, so a scope never opens
   the door for the other threads of the worker, and the reason of the open
   scope is logged and named in the message of a refusal.
 
 The limits of the guard are declared and not glossed over: it is a
-defense IN PROCESS. It does not reach a child process, because a fork or
-a subprocess leaves the patched process and answers for itself, and it
-does not reach a socket that was created before it was installed. The
-isolation of a worker that must not reach the network is the sandbox that
-runs it, and the guard is the defense inside that sandbox.
+defense IN PROCESS. It does not reach a SUBPROCESS that EXECS, because an
+exec replaces the patched process with a new one, and a new one answers
+for itself. A FORK is another matter: it inherits the patched socket
+layer, so the child refuses the network too, and it starts with no
+allowance of its own, because the allowance of the thread that forked is
+not the allowance of the child. The guard also does not reach a RAW
+socket of the C module that was created before it was installed; a socket
+of the Python class that was created before is refused, because the patch
+lives on the class and the class is looked up at the moment of the call.
+The isolation of a worker that must not reach the network is the sandbox
+that runs it, and the guard is the defense inside that sandbox.
 
 The loader of the weights opens that scope around its fetch
 (`python/visionlens/src/visionlens/encoders/weights.py:735`), and the
@@ -154,7 +160,7 @@ the payload of a result to the operation: the result is free-form JSON but
 it must be stable per operation
 (`packages/contracts/src/worker/event.ts`). The bridge is where that
 stability is written down
-(`packages/core/src/worker/operations.ts:521`): for every operation it
+(`packages/core/src/worker/operations.ts:534`): for every operation it
 names the code, the params it sends, the typed success it accepts and the
 typed error it reports.
 
@@ -178,7 +184,7 @@ The typed error carries the frozen code, the message and the retryable
 flag: the frozen flag of the code, read from the frozen table and never
 guessed, for a failure the worker reported, and the flag the HOST itself
 uses for a failure of the CHANNEL, because the host is the one that
-decides whether to retry (`packages/core/src/worker/operations.ts:444`). A
+decides whether to retry (`packages/core/src/worker/operations.ts:456`). A
 failure of the channel is reported with the code that names it, because the
 frozen vocabulary has no other code for it and the bridge never invents
 one.
@@ -191,10 +197,10 @@ boundary that is not enforced.
 
 ## The failure matrix
 
-Every failure of the adapter is ONE typed error of the library vocabulary,
-the process stays alive, and no failure publishes a partial artifact as a
-success (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`). The matrix
-below is that promise, one row at a time, and every row has a test
+Every failure of the adapter is ONE typed refusal, the process stays
+alive, and no failure publishes a partial artifact as a success
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`). The matrix below is
+that promise, one row at a time, and every row has a test
 (`python/visionlens/tests/test_failure_modes.py`).
 
 | what fails | what is refused | the code |
@@ -223,6 +229,12 @@ names the file
 The codes of the matrix are the LIBRARY vocabulary and never the frozen
 wire one. The ten wire codes stay exactly the ten they were, and a
 library code never crosses the wire.
+
+The rows that go through the library assert a typed error of that
+vocabulary. The rows that go through the loader (the permission, the
+digest and the format) assert the REASON of the refusal, which is the
+code of the gate that refused: `DownloadRefusedError` carries a code of
+its own and a reason, and the reason is the gate that said no.
 
 ## The golden parity gate
 

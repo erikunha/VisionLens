@@ -241,10 +241,15 @@ than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
   the loader asked for it.
 
 The limits of the guard are part of the decision and are not glossed over: it is a defense IN
-PROCESS. It does not reach a child process, because a fork or a subprocess leaves the patched
-process and answers for itself, and it does not reach a socket that was created before it was
-installed. The isolation of a worker that must not reach the network is the sandbox that runs
-it, and the guard is the defense inside that sandbox.
+PROCESS. It does not reach a SUBPROCESS that EXECS, because an exec replaces the patched process
+with a new one, and a new one answers for itself. A FORK is another matter: it inherits the
+patched socket layer, so the child refuses the network too, and it starts with no allowance of
+its own, because the allowance of the thread that forked is not the allowance of the child. The
+guard also does not reach a RAW socket of the C module that was created before it was installed;
+a socket of the Python class that was created before is refused, because the patch lives on the
+class and the class is looked up at the moment of the call. The isolation of a worker that must
+not reach the network is the sandbox that runs it, and the guard is the defense inside that
+sandbox.
 
 The refusal is typed and belongs to the LIBRARY vocabulary, never to the frozen wire one: the code
 is `NETWORK_ACCESS_REFUSED`, and it is a new library code
@@ -301,11 +306,11 @@ changed, and no threshold was lowered.
 | Side | Ships | Evidence |
 |---|---|---|
 | Python | the `visionlens` wheel source: simulated encoder, model registry, five operation handlers, the JSONL worker, the golden transcript and the typed facade; the base install carries Pydantic and Pillow, Python `>=3.11` | `python/visionlens/pyproject.toml:10-38`, `python/visionlens/src/visionlens/golden/__init__.py:1` |
-| Python | the CPU vision adapter: the decoder, the canonical preprocessing, the device planner, the SigLIP2 encoder, the content-addressed artifact and its manifest, the failure matrix, and the network guard of the worker | `python/visionlens/src/visionlens/io/decode.py:1`, `python/visionlens/src/visionlens/runtime/netguard.py:42`, `python/visionlens/tests/test_failure_modes.py:1` |
+| Python | the CPU vision adapter: the decoder, the canonical preprocessing, the device planner, the SigLIP2 encoder, the content-addressed artifact and its manifest, the failure matrix, and the network guard of the worker | `python/visionlens/src/visionlens/io/decode.py:1`, `python/visionlens/src/visionlens/runtime/netguard.py:98`, `python/visionlens/tests/test_failure_modes.py:1` |
 | Python | three service skeletons as thin adapters (`SERVICE_NAME` only, no dependencies) | `services/vision/src/vision_lens_vision/__init__.py:3`, `services/vision/pyproject.toml:6` |
 | Python | the worker runtime container: the vendored wheel copy, no Node, byte-guarded | `docker/runtime/`, `scripts/check-docker-vendor.mjs:1` |
 | TypeScript | the worker host: spawn, framing, handshake, cancel ladder, deadline, budget | `packages/core/src/worker/client.ts:1` |
-| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:434` |
+| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:534` (the registry), `:407` (the typed success), `:444` (the typed error) |
 | Shared | the frozen vocabulary, defined once per language and proven identical | `packages/contracts/src/worker/protocol.ts:19`, `python/visionlens/src/visionlens/protocol.py:18` |
 | Cross-language | the real TypeScript host against the real Python worker over the wire | `packages/core/tests/worker/python-integration.test.ts:21-34` |
 

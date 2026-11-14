@@ -329,11 +329,15 @@ fetched.
 
 The scope belongs to the thread that opened it: a scope never opens the
 door for the other threads of the worker. The guard is a defense IN
-PROCESS. It does not reach a child process, because a fork or a
-subprocess leaves the patched process and answers for itself, and it does
-not reach a socket that was created before it was installed. The
-isolation of a worker that must not reach the network is the sandbox that
-runs it.
+PROCESS. It does not reach a SUBPROCESS that EXECS, because an exec
+replaces the patched process with a new one, and a new one answers for
+itself. A FORK inherits the patched socket layer, so the child refuses
+the network too, and it starts with no allowance of its own. The guard
+also does not reach a RAW socket of the C module that was created before
+it was installed; a socket of the Python class that was created before is
+refused, because the patch lives on the class and the class is looked up
+at the moment of the call. The isolation of a worker that must not reach
+the network is the sandbox that runs it.
 
 ## Golden transcript
 

@@ -20,7 +20,7 @@ amendment of 2026-11-14 of `docs/adr/011-python-first-ml-runtime.md`.
 | torch / transformers / Pillow / safetensors | 2.15.0 / 4.57.6 / 13.0.0 / 0.8.0 |
 | the branch | `feat/r1-vision-runtime` |
 | the base | `origin/main` at `5d8c1de` |
-| the tree | `9c7638949c1468991a88800e5afdbde24e6b28ec` (the commit before this record) |
+| the tree | `ffc0fa76494458eb39057e14f22e948d470d9b59` (the commit before this record) |
 | the date | 2026-11-14 |
 
 The commands below were run from the root of a worktree of the repository, and the Python ones
@@ -60,8 +60,8 @@ tolerance: {
   "minCosineSimilarity": 0.9999,
   "reason": "measured on the CPU run of 2026-11-14: the same images embedded in one batch and one image at a time differ by at most 1.383e-05 with a cosine similarity of at least 1.000000000. The bound carries a margin of an order of magnitude over the measured variation, and widening it is a visible diff."
 }
-peak memory bytes: 796524544
-latency (warm run): {"count": 6, "p50Ms": 555.7, "p95Ms": 555.7, "totalMs": 3334.201}
+peak memory bytes: 758071296
+latency (warm run): {"count": 6, "p50Ms": 534.589, "p95Ms": 534.589, "totalMs": 3207.532}
 runtime versions: {"pillow": "13.0.0", "safetensors": "0.8.0", "torch": "2.15.0", "transformers": "4.57.6"}
 the run is green: the artifact on disk carries the digest its manifest names, and the vectors are the golden ones
 ```
@@ -80,12 +80,15 @@ The spec asks for the five committed fixtures; the tree carries SIX of them
 (`packages/core/tests/fixtures/images/`), and the recorded run embedded the six. The count in
 the record is the count of the run.
 
-The latency of this run is the WARM one: the first run of the script pays for the load of the
-model, and the second one is the run that is quoted. The recorded measurement of the adapter
+The latency and the peak memory of this run are the WARM ones: the first run of the script
+pays for the load of the model, and the second one is the run that is quoted. Both are
+measurements of THAT run and neither is part of the artifact digest, so a run on another
+machine, or on a machine that was busy, reports its own numbers and the same digest. The recorded measurement of the adapter
 (`docs/architecture/vision-adapter.md`) carries 543 ms per image and 3.3 s for the six; this run
-measured 555.7 ms per image and 3.33 s for the six. The SAME script measured 1169 ms per image
-while another suite was running on the same machine, which is the honest measure of how much
-the load of the machine moves the number. The latency is NOT part of the artifact digest, so
+measured 534.6 ms per image and 3.21 s for the six. The SAME script measured 1169 ms per image
+while another suite was running on the same machine, and 881.9 ms on a machine that was busy
+with another run, which is the honest measure of how much the load of the machine moves the
+number. The latency is NOT part of the artifact digest, so
 every one of those runs agrees on the content and differs on the speed, exactly as the design
 says.
 
@@ -147,7 +150,7 @@ the field the reader names, and they never change an outcome.
 cd python/visionlens && uv run --group dev pytest tests/test_failure_modes.py -q
 ```
 
-Exit 0 (the count is in 6.4). The matrix is one row per failure path. Every row asserts ONE
+Exit 0 (16 passed). The matrix is one row per failure path. Every row asserts ONE
 typed refusal: the rows that go through the library assert a typed error of the library
 vocabulary, and the rows that go through the loader assert the reason of the refusal, which is
 the code of the gate that refused. The rows that run the embedder also assert that a failed
@@ -186,9 +189,9 @@ artifact of each one is the console output quoted above or the file it names.
 
 | Gate | Command | Exit |
 |---|---|---|
-| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (420 passed) |
+| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (424 passed) |
 | Python types | `cd python/visionlens && uv run --group dev mypy src/visionlens` | 0 (36 files, no issues) |
-| Node suite | `pnpm exec vitest run` | 0 (111 files, 1298 passed, 3 skipped) |
+| Node suite | `pnpm exec vitest run` | 0 (111 files, 1302 passed, 3 skipped) |
 | Lint | `pnpm run lint` | 0 |
 | Type check | `pnpm run typecheck` | 0 (9 of 9 tasks) |
 | Boundary check | `pnpm run check:boundaries` | 0 |
@@ -207,7 +210,7 @@ run of this record was made on a COPY of the package in a temporary directory, s
 artifact of that run is a machine-local path and is not committed. The gate printed:
 
 ```text
-visionlens release gate, started 2026-11-14T21:28:32+00:00
+visionlens release gate, started 2026-11-14T22:25:46+00:00
 [PASS] build: visionlens-0.1.0-py3-none-any.whl + visionlens-0.1.0.tar.gz
 [PASS] metadata-validation
 [PASS] artifact-scan: no checkpoint, dataset, credential or absolute path
@@ -266,16 +269,22 @@ The record states the unverified parts as plainly as the verified ones:
 - the `latencyCostProfile` of the record is still `unknown`: the runs above measured a latency
   and the record was not rewritten with it;
 - the throughput numbers are the numbers of ONE machine on ONE day, and the load of the machine
-  moves them: the same six images measured 543 ms per image on the recorded run, 555.7 ms on
-  the verification run of this document, and 1169 ms while another suite was running;
+  moves them: the same six images measured 543 ms per image on the recorded run, 555.7 ms on an
+  534.6 ms on the verification run of this document, 881.9 ms on a busy machine, and 1169 ms
+  while another suite was running;
 - the provenance of the pinned weights digest is the LFS oid the model hub reports for the
   pinned revision. It was not verified against a second independent source;
 - the network guard was exercised against a local listener and against the worker process, and
   NOT against the real repository: the fetch of the weights was never performed inside a
   guarded worker in this ticket, because the weights were already in the cache;
-- the guard does NOT reach a CHILD PROCESS. A fork or a subprocess leaves the patched process
-  and answers for itself, so the isolation of a worker that must not reach the network is the
-  sandbox that runs it, and the guard is the in-process defense inside that sandbox;
+- the guard does NOT reach a SUBPROCESS that EXECS, because an exec replaces the patched
+  process with a new one. A FORK inherits the patched socket layer, so the child refuses the
+  network too, and it starts with no allowance of its own. The isolation of a worker that must
+  not reach the network is the sandbox that runs it, and the guard is the in-process defense
+  inside that sandbox;
+- the guard does NOT reach a RAW socket of the C module that was created before it was
+  installed. A socket of the Python class that was created before is refused, because the patch
+  lives on the class and the class is looked up at the moment of the call;
 - the adapter does NO OCR and extracts no text. The text of a file is dropped by the decoder
   and the input of the model accepts numbers only, so no text of an image is ever read, let
   alone obeyed.
