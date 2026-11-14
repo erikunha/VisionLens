@@ -30,9 +30,10 @@ import type { WorkerRequestInput, WorkerRequestResult } from './client.js';
  *   (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`);
  * - the SIMULATED shape, which is the one the deterministic runtime of the
  *   frozen protocol answers and which the golden transcript of the Python
- *   package pins byte for byte (`visionlens/golden/__init__.py:1`): the
- *   model, the dimension, the dtype, the count, the vectors, the digest, the
- *   preprocessing fingerprint and the device.
+ *   package pins byte for byte (the transcript is named in
+ *   `docs/architecture/python-owner-map.md`): the model, the dimension, the
+ *   dtype, the count, the vectors, the digest, the preprocessing fingerprint
+ *   and the device.
  *
  * The bridge accepts both and NAMES which one answered, so a caller can
  * never mistake a simulated vector for a recorded run. The wire is not
@@ -103,6 +104,11 @@ export interface RecordedVisionEmbedSuccess {
   readonly dimensions: number;
   readonly dtype: 'float32';
   readonly artifactSha256: string;
+  /**
+   * The images the run could not embed. A run that reports none may omit
+   * the field: the pack's own example of a successful result carries
+   * none, and a missing list reads as the empty one.
+   */
   readonly errorSamples: readonly VisionEmbedErrorSample[];
 }
 
@@ -129,10 +135,12 @@ export type VisionEmbedSuccess = RecordedVisionEmbedSuccess | SimulatedVisionEmb
 
 /**
  * The typed error of an operation: the frozen code, the message and the
- * frozen retryable flag of that code.
+ * retryable flag.
  *
- * The flag is read from the frozen table and never guessed, so a caller
- * that decides whether to retry never has to know the operation.
+ * A failure the WORKER reported carries the frozen flag of its code, read
+ * from the frozen table and never guessed. A failure of the CHANNEL (the
+ * process did not start, the deadline elapsed) carries the flag the HOST
+ * itself uses, because the host is the one that decides whether to retry.
  */
 export interface WorkerOperationErrorResult {
   readonly code: WorkerErrorCode;
@@ -203,13 +211,17 @@ function requireString(record: Record<string, unknown>, field: string): string {
   return value;
 }
 
-function requireInteger(record: Record<string, unknown>, field: string): number {
+function requireInteger(
+  record: Record<string, unknown>,
+  field: string,
+  minimum: number = 0,
+): number {
   const value = record[field];
-  if (typeof value !== 'number' || !Number.isInteger(value)) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum) {
     throw new WorkerOperationContractError(
       VISION_EMBED_OPERATION,
       field,
-      `the result of vision.embed carries no integer ${field}`,
+      `the result of vision.embed carries no integer ${field} of at least ${minimum}`,
     );
   }
   return value;
@@ -251,7 +263,10 @@ function requireDtype(record: Record<string, unknown>): 'float32' {
   return 'float32';
 }
 
-function requireVectors(record: Record<string, unknown>): readonly (readonly number[])[] {
+function requireVectors(
+  record: Record<string, unknown>,
+  dimension: number,
+): readonly (readonly number[])[] {
   const value = record.vectors;
   if (!Array.isArray(value)) {
     throw new WorkerOperationContractError(
@@ -260,12 +275,28 @@ function requireVectors(record: Record<string, unknown>): readonly (readonly num
       'the result of vision.embed carries no vectors array',
     );
   }
+  if (value.length !== record.count) {
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'vectors',
+      `the result of vision.embed carries ${value.length} vectors and counts ${String(record.count)} images`,
+    );
+  }
   return value.map((vector, index) => {
-    if (!Array.isArray(vector) || vector.some((item) => typeof item !== 'number')) {
+    if (!Array.isArray(vector) || vector.length !== dimension) {
       throw new WorkerOperationContractError(
         VISION_EMBED_OPERATION,
         `vectors[${index}]`,
-        'a vector of vision.embed is not an array of numbers',
+        `a vector of vision.embed does not carry the ${dimension} dimensions the result declares`,
+      );
+    }
+    // A NaN or an infinity is a number to JavaScript and a poison to a
+    // float32: it serialises as null and it breaks every comparison.
+    if (vector.some((item) => typeof item !== 'number' || !Number.isFinite(item))) {
+      throw new WorkerOperationContractError(
+        VISION_EMBED_OPERATION,
+        `vectors[${index}]`,
+        'a vector of vision.embed carries a value that is not a finite number',
       );
     }
     return vector as number[];
@@ -277,11 +308,10 @@ function requireErrorSamples(
 ): readonly VisionEmbedErrorSample[] {
   const value = record.errorSamples;
   if (value === undefined) {
-    throw new WorkerOperationContractError(
-      VISION_EMBED_OPERATION,
-      'errorSamples',
-      'the result of vision.embed carries no errorSamples array',
-    );
+    // The pack's own example of a successful result carries no error
+    // sample, so the field is OPTIONAL and a run that reports none reads
+    // as the empty list. A run that reports one carries it.
+    return [];
   }
   if (!Array.isArray(value)) {
     throw new WorkerOperationContractError(
@@ -355,10 +385,10 @@ export function parseSimulatedVisionEmbedSuccess(result: unknown): SimulatedVisi
   const parsed: SimulatedVisionEmbedSuccess = {
     kind: 'simulated',
     model: requireString(record, 'model'),
-    dimension: requireInteger(record, 'dimension'),
+    dimension: requireInteger(record, 'dimension', 1),
     dtype: requireDtype(record),
     count: requireInteger(record, 'count'),
-    vectors: requireVectors(record),
+    vectors: requireVectors(record, requireInteger(record, 'dimension', 1)),
     artifactSha256: requireDigest(record, 'artifactSha256'),
     preprocessingFingerprint: requireFingerprint(record, 'preprocessingFingerprint'),
     device: requireString(record, 'device'),
@@ -376,8 +406,23 @@ export function parseSimulatedVisionEmbedSuccess(result: unknown): SimulatedVisi
  */
 export function parseVisionEmbedSuccess(result: unknown): VisionEmbedSuccess {
   const record = asRecord(result);
-  if ('embeddingRunId' in record) return parseRecordedVisionEmbedSuccess(record);
-  if ('vectors' in record) return parseSimulatedVisionEmbedSuccess(record);
+  const recorded = 'embeddingRunId' in record;
+  const simulated = 'vectors' in record;
+  if (recorded && simulated) {
+    // A payload that carries BOTH markers claims to be a recorded run and
+    // a simulated one at the same time. A worker that answers with the
+    // vectors of a simulation under the name of a recorded run would
+    // have its vectors dropped and the caller told to look on the disk,
+    // so the payload is refused instead of believed.
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'result',
+      'the result of vision.embed carries the markers of BOTH shapes ' +
+        '(embeddingRunId and vectors), and a result that claims both is refused',
+    );
+  }
+  if (recorded) return parseRecordedVisionEmbedSuccess(record);
+  if (simulated) return parseSimulatedVisionEmbedSuccess(record);
   throw new WorkerOperationContractError(
     VISION_EMBED_OPERATION,
     'result',
@@ -398,10 +443,25 @@ export function parseVisionEmbedSuccess(result: unknown): VisionEmbedSuccess {
  */
 export function workerErrorResult(failure: unknown): WorkerOperationErrorResult {
   if (failure instanceof WorkerProtocolError) {
+    // The code travels on the wire, so it is checked against the frozen
+    // vocabulary before it is believed: a code the platform does not
+    // know has no retryable flag, and a result with no flag is not a
+    // result the caller can act on.
+    const frozen = WORKER_ERROR_RETRYABLE as Record<string, boolean | undefined>;
+    const retryable = frozen[failure.code];
+    if (retryable === undefined) {
+      return {
+        code: 'WORKER_CRASHED',
+        message:
+          `the worker reported the code ${failure.code}, which is not one of the frozen codes: ` +
+          failure.message,
+        retryable: WORKER_ERROR_RETRYABLE.WORKER_CRASHED,
+      };
+    }
     return {
       code: failure.code,
       message: failure.message,
-      retryable: WORKER_ERROR_RETRYABLE[failure.code],
+      retryable,
     };
   }
   if (failure instanceof WorkerDeadlineError) {
@@ -412,10 +472,13 @@ export function workerErrorResult(failure: unknown): WorkerOperationErrorResult 
     };
   }
   if (failure instanceof WorkerLaunchError) {
+    // The channel failed, not the worker: the flag is the one the HOST
+    // itself uses to decide whether a launch is worth retrying, because
+    // the host is the one that decides.
     return {
       code: 'WORKER_CRASHED',
       message: failure.message,
-      retryable: WORKER_ERROR_RETRYABLE.WORKER_CRASHED,
+      retryable: failure.retryable,
     };
   }
   const message = failure instanceof Error ? failure.message : String(failure);
@@ -434,6 +497,16 @@ export function workerErrorResult(failure: unknown): WorkerOperationErrorResult 
 export const VISION_EMBED_BRIDGE: WorkerOperationBridge<VisionEmbedInput, VisionEmbedSuccess> = {
   operation: VISION_EMBED_OPERATION,
   buildParams: (input: VisionEmbedInput) => {
+    if (input.images.length === 0) {
+      // A run with no image embedded nothing, and a run that embedded
+      // nothing is not a run: the request is refused here, before the
+      // worker is asked, so no empty artifact is ever produced.
+      throw new WorkerOperationContractError(
+        VISION_EMBED_OPERATION,
+        'images',
+        'the operation vision.embed needs at least one image, and the request carried none',
+      );
+    }
     const params: Record<string, unknown> = {
       images: [...input.images],
       model: input.model,

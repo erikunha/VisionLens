@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+
+import { canonicalJson } from '@vision-lens/contracts';
 import { z } from 'zod';
 
 /**
@@ -78,6 +81,49 @@ export const EmbeddingRunManifestSchema = z.strictObject({
 });
 
 export type EmbeddingRunManifest = z.infer<typeof EmbeddingRunManifestSchema>;
+
+/**
+ * The fields the artifact digest covers: the CONTENT of the artifact.
+ *
+ * The run id, the timestamp, the latency, the peak memory, the runtime
+ * versions and the device describe the RUN and not the content, and two
+ * runs of the same content share the address. The list is the one the
+ * Python side uses (`python/visionlens/src/visionlens/inference/artifact.py`),
+ * and the two must stay identical: a digest that covers another set of
+ * fields is another address.
+ */
+export const EMBEDDING_CONTENT_FIELDS = [
+  'schemaVersion',
+  'modelId',
+  'revision',
+  'sourceUri',
+  'weightsDigest',
+  'preprocessingFingerprint',
+  'preprocessingComponents',
+  'snapshotId',
+  'assetSha256',
+  'count',
+  'dimension',
+  'dtype',
+  'vectorsFileDigest',
+] as const;
+
+/**
+ * The content address of a manifest, recomputed.
+ *
+ * The digest the Python side wrote is recomputed here over the same
+ * canonical JSON, so the two languages agree on the address of a content.
+ * The pack asks that a new result artifact becomes visible only after its
+ * checksum (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`), and a
+ * manifest whose digest does not match its own content is not a checksum.
+ */
+export function embeddingContentDigest(manifest: Record<string, unknown>): string {
+  const content: Record<string, unknown> = {};
+  for (const field of EMBEDDING_CONTENT_FIELDS) {
+    content[field] = manifest[field];
+  }
+  return createHash('sha256').update(canonicalJson(content), 'utf8').digest('hex');
+}
 
 /**
  * The JSON Schema of the manifest, generated from the schema above.

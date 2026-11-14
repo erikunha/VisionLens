@@ -4,7 +4,7 @@ import { findModel, type DatasetRegistry, type ModelRegistryEntry } from '../ben
 import { newEntityId } from '../store/ids.js';
 import type { Repositories } from '../store/repositories/index.js';
 
-import { validateEmbeddingManifest } from './embedding-manifest.js';
+import { validateEmbeddingManifest, embeddingContentDigest } from './embedding-manifest.js';
 
 /**
  * The single-writer commit of one embedding run.
@@ -18,8 +18,16 @@ import { validateEmbeddingManifest } from './embedding-manifest.js';
  *
  * Every refusal happens BEFORE the first write, so a commit that is
  * refused leaves the store exactly as it was: an invalid manifest, a
- * model the registry does not record, a manifest of another revision,
- * and an asset the store does not know are four refusals and no row.
+ * manifest whose digest does not match its own content, a model the
+ * registry does not record, a manifest of another revision, and an asset
+ * the store does not know are five refusals and no row.
+ *
+ * The commit is IDEMPOTENT: the same content committed twice returns the
+ * row the first commit wrote and writes no second one. The pack asks that
+ * a transaction across repositories uses an idempotency key
+ * (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`), and the key here
+ * is the content itself: the kind, the transform, the fingerprint of the
+ * preprocessing and the ordered sources.
  *
  * The registry is the switch: a model that is not in
  * `datasets/registry.json` cannot be committed, so removing the entry
@@ -71,6 +79,8 @@ export interface EmbeddingCommitInput {
  * The commit is refused, and nothing is written, when:
  *
  *  - the manifest does not validate against the ratified schema;
+ *  - the digest of the manifest does not match the content of the
+ *    manifest, so the address it carries is not the address of its bytes;
  *  - the registry does not record the model (the rollback switch);
  *  - the manifest names another revision or another digest than the
  *    record, so it is the manifest of another model;
@@ -83,6 +93,22 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
     return { ok: false, issues: validation.issues };
   }
   const manifest = validation.manifest;
+
+  // The checksum: the digest the Python side wrote is recomputed here
+  // over the same canonical JSON, so a manifest that claims an address
+  // its own content does not hash to is refused before any row is
+  // written. The pack asks that a new result artifact becomes visible
+  // only after its checksum
+  // (docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26).
+  const recomputed = embeddingContentDigest(manifest);
+  if (recomputed !== manifest.artifactDigest) {
+    return {
+      ok: false,
+      issues: [
+        `artifactDigest: the manifest carries ${manifest.artifactDigest} and its own content hashes to ${recomputed}`,
+      ],
+    };
+  }
 
   let record: ModelRegistryEntry;
   try {
@@ -141,6 +167,29 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
     newId,
   });
 
+  const transform = embeddingTransform(record.modelId, record.revision);
+  const committed = input.repositories.derivedArtifacts
+    .listByEncoder(modelVersion.id)
+    .find(
+      (candidate) =>
+        candidate.kind === EMBEDDING_ARTIFACT_KIND &&
+        candidate.transform === transform &&
+        candidate.transformFingerprint === manifest.preprocessingFingerprint &&
+        candidate.sourceAssetIds.length === sourceAssetIds.length &&
+        candidate.sourceAssetIds.every((id, index) => id === sourceAssetIds[index]),
+    );
+  if (committed !== undefined) {
+    // The same content was already committed. The commit is idempotent:
+    // it returns the row the first commit wrote and writes no second one,
+    // because two rows would be two truths about the same content.
+    return {
+      ok: true,
+      artifact: committed,
+      modelVersionId: modelVersion.id,
+      sourceAssetIds,
+    };
+  }
+
   const snapshot = input.repositories.snapshots.getById(manifest.snapshotId);
   const artifact = input.repositories.derivedArtifacts.insert(
     {
@@ -148,7 +197,7 @@ export function commitEmbeddingRun(input: EmbeddingCommitInput): EmbeddingCommit
       kind: EMBEDDING_ARTIFACT_KIND,
       sourceAssetIds,
       ...(snapshot === undefined ? {} : { sourceSnapshotId: snapshot.id }),
-      transform: embeddingTransform(record.modelId, record.revision),
+      transform,
       transformFingerprint: manifest.preprocessingFingerprint,
       createdAt: now(),
     },

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { commitEmbeddingRun, embeddingTransform } from '../../src/adapter/embedding-commit.js';
+import { embeddingContentDigest } from '../../src/adapter/embedding-manifest.js';
 import { DatasetRegistrySchema } from '../../src/benchmark/registry.js';
 import { assetFixture, createTestStore, FAKE_SHA256 } from '../store/helpers.js';
 
@@ -24,7 +25,7 @@ const WEIGHTS_DIGEST = '612923381c76ec5a9bed335d1c48827e3f2e506ac31b044b63b2031f
 
 /** A manifest of one run over one asset. */
 function manifestFixture(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
+  const manifest: Record<string, unknown> = {
     schemaVersion: 1,
     embeddingRunId: 'embed-0123456789abcdef',
     modelId: MODEL_ID,
@@ -39,7 +40,6 @@ function manifestFixture(overrides: Record<string, unknown> = {}): Record<string
     dimension: 4,
     dtype: 'float32',
     vectorsFileDigest: 'b'.repeat(64),
-    artifactDigest: 'c'.repeat(64),
     device: 'cpu',
     runtimeVersions: { pillow: '13.0.0' },
     createdAt: '2026-11-14T18:00:00.000Z',
@@ -49,6 +49,11 @@ function manifestFixture(overrides: Record<string, unknown> = {}): Record<string
     calibrationStatus: 'uncalibrated',
     ...overrides,
   };
+  // The digest of the manifest is the ADDRESS of its content, so the
+  // fixture carries the one its own content hashes to. A fixture that
+  // names another digest keeps it, because the commit has to refuse it.
+  if (typeof manifest.artifactDigest === 'string') return manifest;
+  return { ...manifest, artifactDigest: embeddingContentDigest(manifest) };
 }
 
 /** The tracked registry, parsed by the reader that validates it. */
@@ -192,6 +197,95 @@ describe('the single-writer commit of an embedding run', () => {
 
   it('names the transform of a run the way the domain names it', () => {
     expect(embeddingTransform(MODEL_ID, REVISION)).toBe(`embed:${MODEL_ID}@${REVISION}`);
+  });
+
+  it('refuses a manifest whose digest is not the address of its own content', async () => {
+    // The pack asks that a new result artifact becomes visible only after
+    // its checksum, and a digest that is not the checksum of the content
+    // is not a checksum.
+    const store = await createTestStore();
+    try {
+      store.repos.assets.insert(assetFixture({ sha256: FAKE_SHA256 }));
+
+      const result = commitEmbeddingRun({
+        manifest: manifestFixture({ artifactDigest: 'c'.repeat(64) }),
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.issues.join(' ')).toContain('artifactDigest');
+      expect(store.repos.models.findByNameAndVersion(MODEL_ID, REVISION)).toBeUndefined();
+      expect(store.repos.derivedArtifacts.listBySnapshot('snapshot-1')).toHaveLength(0);
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  it('commits the same content once, and a second commit writes no second row', async () => {
+    // The pack asks that a transaction across repositories uses an
+    // idempotency key: the key here is the content itself.
+    const store = await createTestStore();
+    try {
+      store.repos.assets.insert(assetFixture({ sha256: FAKE_SHA256 }));
+
+      const first = commitEmbeddingRun({
+        manifest: manifestFixture(),
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+      const second = commitEmbeddingRun({
+        manifest: manifestFixture({ embeddingRunId: 'embed-another-run' }),
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      if (!first.ok || !second.ok) return;
+      expect(second.artifact.id).toBe(first.artifact.id);
+      expect(store.repos.derivedArtifacts.listByEncoder(first.modelVersionId)).toHaveLength(1);
+    } finally {
+      store.cleanup();
+    }
+  });
+
+  it('accepts the manifest the Python side really wrote', async () => {
+    // The committed artifact of the recorded run: the digest in it was
+    // computed by the Python side, and the TypeScript side recomputes the
+    // same address over the same canonical JSON.
+    const manifestPath = path.join(
+      repoRoot,
+      'benchmarks',
+      'parity',
+      'vision-embed.artifact',
+      'manifest.json',
+    );
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+
+    expect(embeddingContentDigest(manifest)).toBe(manifest.artifactDigest);
+
+    const store = await createTestStore();
+    try {
+      for (const digest of manifest.assetSha256 as string[]) {
+        store.repos.assets.insert(assetFixture({ sha256: digest }));
+      }
+
+      const result = commitEmbeddingRun({
+        manifest,
+        repositories: store.repos,
+        registry: trackedRegistry(),
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.artifact.sourceAssetIds).toHaveLength(
+        (manifest.assetSha256 as string[]).length,
+      );
+    } finally {
+      store.cleanup();
+    }
   });
 });
 

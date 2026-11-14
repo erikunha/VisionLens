@@ -20,7 +20,7 @@ import {
   type VisionEmbedInput,
   type VisionEmbedSuccess,
 } from '../../src/worker/index.js';
-import { WorkerProtocolError } from '../../src/worker/errors.js';
+import { WorkerDeadlineError, WorkerLaunchError, WorkerProtocolError } from '../../src/worker/errors.js';
 import { teardown, track } from './helpers.js';
 
 vi.setConfig({ testTimeout: 15_000 });
@@ -53,7 +53,7 @@ const RECORDED_PAYLOAD = {
 /** The simulated payload, field by field, as the frozen worker answers it. */
 const SIMULATED_PAYLOAD = {
   model: 'siglip2-base',
-  dimension: 768,
+  dimension: 2,
   dtype: 'float32',
   count: 2,
   vectors: [
@@ -108,6 +108,15 @@ describe('the vision.embed bridge', () => {
     expect(params).not.toHaveProperty('device');
   });
 
+  it('refuses a request with no image at all, before the worker is asked', () => {
+    try {
+      VISION_EMBED_BRIDGE.buildParams(embedInput({ images: [] }));
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('images');
+    }
+  });
+
   it('parses the recorded success field by field', () => {
     const parsed = parseRecordedVisionEmbedSuccess(RECORDED_PAYLOAD);
 
@@ -128,7 +137,7 @@ describe('the vision.embed bridge', () => {
     expect(parsed).toEqual({
       kind: 'simulated',
       model: 'siglip2-base',
-      dimension: 768,
+      dimension: 2,
       dtype: 'float32',
       count: 2,
       vectors: [
@@ -235,6 +244,75 @@ describe('the vision.embed bridge', () => {
     }
   });
 
+  it('refuses a payload that names both shapes, and names the field', () => {
+    // A worker that answers with the vectors of a simulation under the
+    // name of a recorded run would have its vectors dropped, and the
+    // caller told to look on the disk.
+    try {
+      parseVisionEmbedSuccess({ ...SIMULATED_PAYLOAD, ...RECORDED_PAYLOAD });
+      expect.unreachable('the payload should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('result');
+    }
+  });
+
+  it('refuses a vector that is not a finite number', () => {
+    for (const poison of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      try {
+        parseVisionEmbedSuccess({
+          ...SIMULATED_PAYLOAD,
+          vectors: [[poison, 0.2], [0.3, 0.4]],
+        });
+        expect.unreachable('the payload should have been refused');
+      } catch (error) {
+        expect((error as WorkerOperationContractError).field).toBe('vectors[0]');
+      }
+    }
+  });
+
+  it('refuses a vector that does not carry the dimensions the result declares', () => {
+    try {
+      parseVisionEmbedSuccess({ ...SIMULATED_PAYLOAD, vectors: [[0.1], [0.3, 0.4]] });
+      expect.unreachable('the payload should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('vectors[0]');
+    }
+  });
+
+  it('refuses a count that does not match the vectors', () => {
+    try {
+      parseVisionEmbedSuccess({ ...SIMULATED_PAYLOAD, count: 9 });
+      expect.unreachable('the payload should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('vectors');
+    }
+  });
+
+  it('refuses a count that is negative', () => {
+    try {
+      parseVisionEmbedSuccess({ ...SIMULATED_PAYLOAD, count: -1 });
+      expect.unreachable('the payload should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('count');
+    }
+  });
+
+  it('accepts the recorded payload of the pack example, which carries no error sample', () => {
+    // The pack's own example of a successful result carries no error
+    // sample, so the bridge accepts it and reads the samples as none.
+    const parsed = parseVisionEmbedSuccess({
+      embeddingRunId: 'embed_demo_001',
+      count: 5,
+      dimensions: 768,
+      dtype: 'float32',
+      artifactSha256: SHA256,
+      source: 'synthetic-example-not-a-real-run',
+    });
+
+    expect(parsed.kind).toBe('recorded');
+    expect(parsed.kind === 'recorded' ? parsed.errorSamples : undefined).toEqual([]);
+  });
+
   it('refuses a payload that is not an object at all', () => {
     expect(() => parseVisionEmbedSuccess('vectors')).toThrowError(WorkerOperationContractError);
     expect(() => parseVisionEmbedSuccess([1, 2, 3])).toThrowError(WorkerOperationContractError);
@@ -266,10 +344,34 @@ describe('the vision.embed bridge', () => {
   });
 
   it('reports a deadline with the frozen code of the deadline', () => {
-    const outcome = workerErrorResult(new Error('deadline'));
+    const outcome = workerErrorResult(new WorkerDeadlineError('r-bridge', 30));
+
+    expect(outcome.code).toBe('DEADLINE_EXCEEDED');
+    expect(outcome.retryable).toBe(false);
+    expect(outcome.message).toContain('r-bridge');
+  });
+
+  it('reports a failure of the channel with the flag the host itself uses', () => {
+    // The host decides whether a launch is worth retrying, so the bridge
+    // reports the flag the host uses and not the one of a proxy code.
+    const spawnFailure = workerErrorResult(new WorkerLaunchError('spawn-error', 'no python'));
+    const death = workerErrorResult(new WorkerLaunchError('worker-died', 'the worker died'));
+
+    expect(spawnFailure.code).toBe('WORKER_CRASHED');
+    expect(spawnFailure.retryable).toBe(false);
+    expect(death.retryable).toBe(true);
+  });
+
+  it('reports a code outside the frozen vocabulary as a crash of the worker', () => {
+    // The code travels on the wire, so a code the platform does not know
+    // has no retryable flag of its own.
+    const outcome = workerErrorResult(
+      new WorkerProtocolError('NOT_A_FROZEN_CODE' as never, 'the worker invented a code'),
+    );
 
     expect(outcome.code).toBe('WORKER_CRASHED');
     expect(outcome.retryable).toBe(true);
+    expect(outcome.message).toContain('NOT_A_FROZEN_CODE');
   });
 
   it('throws for a payload that breaks the contract, even in the tolerant call', async () => {
