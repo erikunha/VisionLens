@@ -112,6 +112,33 @@ class DecodedImage:
     image: Any = field(compare=False, repr=False)
 
 
+def _drop_cached_exif(picture: Any) -> None:
+    """Empty the EXIF object that Pillow cached on the picture.
+
+    Pillow keeps the parsed EXIF on the picture itself, and the
+    transposition path parses EVERY tag, so the text tags of the file
+    survive there even after the info of the picture is cleared. The
+    cache is emptied through the public accessor, and the sub-IFDs are
+    emptied too, because the user comment of a file lives in one of them.
+
+    The caller clears the info BEFORE calling this, so the accessor
+    cannot parse the raw bytes of the file again.
+    """
+    try:
+        exif = picture.getexif()
+    except Exception:  # pragma: no cover - a picture with no exif at all
+        return
+    try:
+        exif.clear()
+    except Exception:  # pragma: no cover - an exif that cannot be cleared
+        return
+    for sub in list(getattr(exif, "_ifd", {}).values()):
+        try:
+            sub.clear()
+        except Exception:  # pragma: no cover - a sub-ifd that cannot be cleared
+            pass
+
+
 class DecodeService:
     """Decode images that live under an approved root.
 
@@ -381,6 +408,12 @@ class DecodeService:
             decoded.info.clear()
         except AttributeError:  # pragma: no cover - a picture with no info
             pass
+        # Pillow caches the EXIF object on the picture, and the transpose
+        # path parses EVERY tag of it, so the cache carries the text tags
+        # even after the info is cleared. The cache is emptied here as
+        # well, and AFTER the info is cleared, so that nothing can be
+        # parsed again from the raw bytes of the file.
+        _drop_cached_exif(decoded)
         return DecodedImage(
             path=path,
             mime_type=mime_type,
