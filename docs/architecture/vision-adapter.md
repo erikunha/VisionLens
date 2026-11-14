@@ -6,6 +6,11 @@ writes the vectors into a content-addressed artifact. The TypeScript
 side validates the manifest and commits the derived artifact; the
 Python side writes no domain row.
 
+The record of the verification of this adapter is
+`docs/architecture/vision-adapter-verification.md`: every gate, with the
+exact command, the environment, the git SHA, the exit code and the
+output, and the list of what the ticket did NOT prove.
+
 ## The pipeline
 
 ```text

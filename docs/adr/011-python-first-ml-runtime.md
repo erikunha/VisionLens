@@ -291,9 +291,11 @@ changed, and no threshold was lowered.
 | Side | Ships | Evidence |
 |---|---|---|
 | Python | the `visionlens` wheel source: simulated encoder, model registry, five operation handlers, the JSONL worker, the golden transcript and the typed facade; the base install carries Pydantic and Pillow, Python `>=3.11` | `python/visionlens/pyproject.toml:10-38`, `python/visionlens/src/visionlens/golden/__init__.py:1` |
+| Python | the CPU vision adapter: the decoder, the canonical preprocessing, the device planner, the SigLIP2 encoder, the content-addressed artifact and its manifest, the failure matrix, and the network guard of the worker | `python/visionlens/src/visionlens/io/decode.py:1`, `python/visionlens/src/visionlens/runtime/netguard.py:42`, `python/visionlens/tests/test_failure_modes.py:1` |
 | Python | three service skeletons as thin adapters (`SERVICE_NAME` only, no dependencies) | `services/vision/src/vision_lens_vision/__init__.py:3`, `services/vision/pyproject.toml:6` |
 | Python | the worker runtime container: the vendored wheel copy, no Node, byte-guarded | `docker/runtime/`, `scripts/check-docker-vendor.mjs:1` |
 | TypeScript | the worker host: spawn, framing, handshake, cancel ladder, deadline, budget | `packages/core/src/worker/client.ts:1` |
+| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:434` |
 | Shared | the frozen vocabulary, defined once per language and proven identical | `packages/contracts/src/worker/protocol.ts:19`, `python/visionlens/src/visionlens/protocol.py:18` |
 | Cross-language | the real TypeScript host against the real Python worker over the wire | `packages/core/tests/worker/python-integration.test.ts:21-34` |
 
