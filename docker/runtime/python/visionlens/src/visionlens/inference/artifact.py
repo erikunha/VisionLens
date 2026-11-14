@@ -256,18 +256,17 @@ def write_embedding_artifact(
     vectors_digest = hashlib.sha256(payload).hexdigest()
 
     directory = artifact_directory(root, manifest.embedding_run_id)
-    directory.mkdir(parents=True, exist_ok=True)
     vectors_path = directory / VECTORS_FILE_NAME
-    _write_atomic(vectors_path, payload)
-
-    filled = EmbeddingRunManifest(
-        **{
-            **manifest.__dict__,
-            "vectors_file_digest": vectors_digest,
-        }
-    ).with_digest()
     manifest_path = directory / MANIFEST_FILE_NAME
     try:
+        directory.mkdir(parents=True, exist_ok=True)
+        _write_atomic(vectors_path, payload)
+        filled = EmbeddingRunManifest(
+            **{
+                **manifest.__dict__,
+                "vectors_file_digest": vectors_digest,
+            }
+        ).with_digest()
         _write_atomic(
             manifest_path,
             json.dumps(filled.to_dict(), sort_keys=True, indent=2).encode("utf8"),
@@ -275,7 +274,10 @@ def write_embedding_artifact(
     except BaseException:
         # The artifact is published WHOLE or not at all: a directory that
         # carries the vectors of a run and no manifest is an orphan that
-        # looks like a run, so it is removed with them.
+        # looks like a run, so it is removed with them. The directory
+        # itself goes too, because the pack names the artifact by its
+        # directory and an empty directory of a failed run is a leftover
+        # of a run that never happened.
         try:
             vectors_path.unlink()
         except OSError:

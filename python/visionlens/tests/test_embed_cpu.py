@@ -144,7 +144,38 @@ def test_the_vectors_are_on_disk_and_the_frame_carries_no_payload(tmp_path: Path
 def test_the_artifact_is_published_whole_or_not_at_all(tmp_path: Path, monkeypatch):
     # A directory that carries the vectors of a run and no manifest looks
     # like a run that nobody can read, so the vectors are removed with the
-    # manifest that failed to be written.
+    # manifest that failed to be written. The mock refuses the MANIFEST
+    # and not the vectors: the vectors are what the manifest names, so a
+    # refusal of the vectors never leaves a manifest behind, and a test
+    # that refused the vectors would prove nothing about the manifest.
+    from visionlens.inference import artifact as artifact_module
+
+    real_write = artifact_module._write_atomic
+
+    def refuse_the_manifest(path: Path, payload: bytes) -> None:
+        if Path(path).name == artifact_module.MANIFEST_FILE_NAME:
+            raise OSError(28, "No space left on device")
+        real_write(path, payload)
+
+    monkeypatch.setattr(artifact_module, "_write_atomic", refuse_the_manifest)
+    embedder = _embedder(tmp_path)
+
+    with pytest.raises(OSError):
+        embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
+
+    root = tmp_path / "artifacts-root" / "artifacts" / "embedding"
+    leftovers = list(root.glob("*")) if root.exists() else []
+    assert leftovers == []
+
+
+def test_a_run_that_cannot_write_its_vectors_leaves_no_directory(
+    tmp_path: Path,
+    monkeypatch,
+):
+    # The directory of a run that failed to write its vectors is a
+    # leftover of a run that never happened: the pack names the artifact
+    # by its directory, so an empty directory of a failed run is a
+    # visible trace of it.
     from visionlens.inference import artifact as artifact_module
 
     def refuse(*args: object, **kwargs: object) -> None:
@@ -157,7 +188,7 @@ def test_the_artifact_is_published_whole_or_not_at_all(tmp_path: Path, monkeypat
         embedder.embed(EmbedRequest(snapshot_id="snapshot-test", assets=_assets()))
 
     root = tmp_path / "artifacts-root" / "artifacts" / "embedding"
-    leftovers = list(root.glob("*/vectors.f32")) if root.exists() else []
+    leftovers = list(root.glob("*")) if root.exists() else []
     assert leftovers == []
 
 

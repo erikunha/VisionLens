@@ -300,6 +300,33 @@ class VisionEmbedder:
                 batch_size = reduced
                 continue
             elapsed = time.perf_counter() - started
+            if len(output.vectors) != size:
+                # The manifest pairs a vector with an asset BY POSITION, so
+                # a batch that answers with another number of vectors than
+                # the number of images it was given would pair the wrong
+                # vector with the wrong asset. The count of the whole run
+                # is not enough: two batches that compensate each other
+                # leave the total right and the pairing wrong.
+                raise ModelRunFailedError(
+                    "the encoder answered with "
+                    + str(len(output.vectors))
+                    + " vectors for the "
+                    + str(size)
+                    + " images of its batch, and the manifest pairs a "
+                    "vector with an asset by position"
+                )
+            for vector in output.vectors:
+                if len(vector) != self.encoder.dimension:
+                    # A vector of another width is a refusal and not a
+                    # number: the manifest would declare a dimension the
+                    # vectors do not carry.
+                    raise ModelRunFailedError(
+                        "the encoder answered with a vector of "
+                        + str(len(vector))
+                        + " dimensions for the "
+                        + str(self.encoder.dimension)
+                        + " the model declares"
+                    )
             latencies.extend([elapsed * 1000.0 / size] * size)
             vectors.extend(output.vectors)
             start += size
