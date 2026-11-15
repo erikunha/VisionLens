@@ -32,10 +32,23 @@ vision = [
     "transformers>=4.57,<5",
     "safetensors>=0.6,<1",
 ]
-training = []
+# The `training` extra is the one this ticket fills: the estimator of the
+# M0 rung (scikit-learn, with numpy under it) and the reader of the frozen
+# feature artifact (joblib). The recipe imports none of it and the
+# estimator imports the stack inside the fit, so the base install stays
+# free of the heavy stack until a probe is trained. The checkpoint of a
+# run is a JSON document and not a pickled estimator, so it needs no
+# serialization library of its own.
+training = [
+    "scikit-learn>=1.7,<2",
+    "numpy>=2.3,<3",
+    "joblib>=1.5,<2",
+]
 agents = []
 server = []
-all = ["visionlens[vision]"]
+# The aggregate carries every capability extra, spelled as self references
+# so the pins live in one place.
+all = ["visionlens[vision]", "visionlens[training]"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/visionlens"]
