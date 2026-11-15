@@ -217,7 +217,57 @@ export interface Config {
    * Disagreements are flagged with `lowConsensus: true` on the ProcessedResult.
    */
   readonly consensusProviders?: readonly string[];
+  /**
+   * The Python route: the opt-in that sends the `vision.embed` operation to
+   * the Python worker.
+   *
+   * Absent means the route is OFF, and the refusal names the environment
+   * variable that turns it on. There is no autodetection of an installed
+   * worker, because a route that appears by itself is the silent provider
+   * change the ticket forbids.
+   */
+  readonly pythonRoute?: PythonRouteConfig;
 }
+
+/**
+ * The configuration of the Python route.
+ *
+ * The interpreter and the script of the worker are NOT here: they are the
+ * seam of the worker host and they travel in the environment the host reads
+ * (`VISION_LENS_WORKER_INTERPRETER` and `VISION_LENS_WORKER_SCRIPT`), so
+ * the route does not have a second way to name them.
+ */
+export interface PythonRouteConfig {
+  /** Whether the route is enabled. The default is the refusal. */
+  readonly enabled: boolean;
+  /** The workspace the runs of the route belong to. */
+  readonly workspaceId: string;
+  /** The root the worker writes its artifacts under. */
+  readonly artifactRoot: string;
+  /** The wall-clock budget of one operation, in seconds. */
+  readonly maxSeconds: number;
+}
+
+/** The environment variable that turns the Python route on. */
+export const PYTHON_ROUTE_ENV = 'VISION_LENS_PYTHON_ROUTE';
+
+/** The value of {@link PYTHON_ROUTE_ENV} that enables the route. */
+export const PYTHON_ROUTE_ENABLED_VALUE = 'enabled';
+
+/** The environment variable that names the workspace of the route. */
+export const PYTHON_WORKSPACE_ENV = 'VISION_LENS_PYTHON_WORKSPACE';
+
+/** The environment variable that names the root the artifacts live under. */
+export const PYTHON_ARTIFACT_ROOT_ENV = 'VISION_LENS_PYTHON_ARTIFACT_ROOT';
+
+/** The environment variable that carries the wall-clock budget of the route. */
+export const PYTHON_MAX_SECONDS_ENV = 'VISION_LENS_PYTHON_MAX_SECONDS';
+
+/** The workspace of the route when the operator names none. */
+export const DEFAULT_PYTHON_WORKSPACE = 'local';
+
+/** The wall-clock budget of the route when the operator names none. */
+export const DEFAULT_PYTHON_MAX_SECONDS = 300;
 
 // Default categories file — lives in examples/ so config module stays domain-agnostic.
 // Resolved relative to the compiled output (dist/config/) → ../../examples/categories.json
@@ -282,6 +332,14 @@ export interface RawCliOptions {
   embed?: boolean;
   sessionGapMinutes?: number;
   consensusProviders?: string[];
+  /** Whether the Python route is enabled (the flag of the opt-in). */
+  pythonRoute?: string;
+  /** The workspace the runs of the Python route belong to. */
+  pythonWorkspace?: string;
+  /** The root the worker writes its artifacts under. */
+  pythonArtifactRoot?: string;
+  /** The wall-clock budget of one operation of the Python route, in seconds. */
+  pythonMaxSeconds?: string;
 }
 
 const DEFAULT_MODEL: Record<string, string> = {
@@ -315,6 +373,63 @@ export const DEFAULT_MAX_RETRIES = 3;
 export function parseRetryCount(value: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_MAX_RETRIES;
   return Math.max(0, value);
+}
+
+/**
+ * Resolves the configuration of the Python route.
+ *
+ * The route is OPT IN and the opt in is explicit: the environment variable
+ * `VISION_LENS_PYTHON_ROUTE` carries the word `enabled` and nothing else
+ * turns it on. There is no autodetection of an installed worker, because a
+ * route that appears by itself is the silent provider change the ticket
+ * forbids.
+ *
+ * The artifact root is the root the WORKER writes under, and the facade
+ * hands the same value to the worker when it launches it, so the two can
+ * never disagree about where the bytes are.
+ */
+export function resolvePythonRouteConfig(options: RawCliOptions = {}): PythonRouteConfig {
+  const rawRoute = (
+    options.pythonRoute ??
+    process.env[PYTHON_ROUTE_ENV] ??
+    ''
+  ).trim();
+  const enabled = rawRoute.toLowerCase() === PYTHON_ROUTE_ENABLED_VALUE;
+
+  const workspaceId =
+    (options.pythonWorkspace ?? process.env[PYTHON_WORKSPACE_ENV] ?? '').trim() ||
+    DEFAULT_PYTHON_WORKSPACE;
+
+  const artifactRoot = (
+    options.pythonArtifactRoot ??
+    process.env[PYTHON_ARTIFACT_ROOT_ENV] ??
+    ''
+  ).trim();
+
+  const maxSeconds = enabled
+    ? resolvePythonMaxSeconds(options.pythonMaxSeconds ?? process.env[PYTHON_MAX_SECONDS_ENV])
+    : DEFAULT_PYTHON_MAX_SECONDS;
+
+  return { enabled, workspaceId, artifactRoot, maxSeconds };
+}
+
+/**
+ * The wall-clock budget of the route, in seconds.
+ *
+ * A budget that is not a whole number of seconds is refused instead of
+ * being rounded: a budget of zero would be a request that may never run,
+ * and a budget that is silently rounded is a budget the operator did not
+ * ask for.
+ */
+function resolvePythonMaxSeconds(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === '') return DEFAULT_PYTHON_MAX_SECONDS;
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error(
+      `[error] --python-max-seconds must be a whole number of seconds of at least 1 (got: ${raw})`,
+    );
+  }
+  return parsed;
 }
 
 export async function loadConfig(cliOptions: RawCliOptions): Promise<Config> {
@@ -457,6 +572,11 @@ export async function loadConfig(cliOptions: RawCliOptions): Promise<Config> {
 
   const defaultModel = DEFAULT_MODEL[provider] ?? 'gpt-4o';
 
+  // The Python route is resolved ONLY when the operator turned it on: a
+  // route that is off must not read a single environment variable more
+  // than the legacy path read before the route existed.
+  const pythonRoute = resolvePythonRouteConfig(cliOptions);
+
   return {
     inputDir: cliOptions.inputDir ?? cliOptions.input ?? process.env['INPUT_DIR'] ?? './input',
     outputDir: cliOptions.outputDir ?? cliOptions.output ?? process.env['OUTPUT_DIR'] ?? './output',
@@ -516,6 +636,10 @@ export async function loadConfig(cliOptions: RawCliOptions): Promise<Config> {
     embed: cliOptions.embed ?? false,
     sessionGapMinutes: cliOptions.sessionGapMinutes,
     consensusProviders: cliOptions.consensusProviders,
+    // The route is resolved ONLY when the operator turned it on, so the
+    // legacy path reads exactly as many environment variables as it read
+    // before the route existed.
+    pythonRoute: pythonRoute?.enabled ? pythonRoute : undefined,
   };
 }
 
