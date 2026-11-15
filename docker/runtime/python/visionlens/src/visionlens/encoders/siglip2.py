@@ -14,6 +14,7 @@ fingerprint of the run describes the work that was really done.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any, Optional, Sequence
 
@@ -56,6 +57,13 @@ class Siglip2Encoder:
         self._model_dir = Path(model_dir)
         self._device = device
         self._model: Any = None
+        self._torch: Any = None
+        # The load of the model happens once, even when two requests of
+        # the worker arrive at the same time: the model weighs more than
+        # a gigabyte, and two of them would not fit in the memory of the
+        # machine. The lock is what makes the ONE load a fact and not a
+        # hope.
+        self._load_lock = threading.Lock()
 
     @property
     def device(self) -> str:
@@ -67,36 +75,47 @@ class Siglip2Encoder:
     def _load(self) -> Any:
         """Build the model from the local directory.
 
+        The model is built ONCE, even when two threads ask for it at the
+        same time. The check outside the lock is the fast path, and the
+        check inside it is the one that decides: the second thread waits
+        for the first and finds the model already built.
+
         @raises MissingExtraError when the heavy stack is not installed.
         @raises ModelRunFailedError when the bytes of the directory are not
             the bytes the record names.
         """
         if self._model is not None:
             return self._model
-        # The bytes are checked before the heavy stack is imported: a
-        # refusal does not need torch, and a directory that carries other
-        # bytes never reaches the model.
-        self._verify_weights()
-        try:
-            import torch
-            from transformers import AutoModel
-        except ImportError as exc:
-            raise MissingExtraError(
-                "the SigLIP2 adapter needs the '"
-                + REQUIRED_EXTRA
-                + "' extra, which this environment does not have: "
-                + INSTALL_COMMAND
-            ) from exc
-        model = AutoModel.from_pretrained(
-            str(self._model_dir),
-            local_files_only=True,
-            trust_remote_code=False,
-        )
-        model.eval()
-        model.to(self.device)
-        self._model = model
-        self._torch = torch
-        return model
+        with self._load_lock:
+            if self._model is not None:
+                return self._model
+            # The bytes are checked before the heavy stack is imported: a
+            # refusal does not need torch, and a directory that carries
+            # other bytes never reaches the model.
+            self._verify_weights()
+            try:
+                import torch
+                from transformers import AutoModel
+            except ImportError as exc:
+                raise MissingExtraError(
+                    "the SigLIP2 adapter needs the '"
+                    + REQUIRED_EXTRA
+                    + "' extra, which this environment does not have: "
+                    + INSTALL_COMMAND
+                ) from exc
+            model = AutoModel.from_pretrained(
+                str(self._model_dir),
+                local_files_only=True,
+                trust_remote_code=False,
+            )
+            model.eval()
+            model.to(self.device)
+            # The torch module is stored BEFORE the model, so a thread that
+            # finds a model finds the module with it: the model is the
+            # marker of a finished load.
+            self._torch = torch
+            self._model = model
+            return model
 
     def _verify_weights(self) -> None:
         """Refuse to build a model from bytes nobody checked.

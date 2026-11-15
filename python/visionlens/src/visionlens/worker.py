@@ -592,10 +592,17 @@ class Worker:
         self._writer.flush()
 
     def _emit_hello(self) -> None:
+        # The models of the hello are the ones the worker may serve: the
+        # placeholder models of the simulated runtime and, when the
+        # runtime of the recorded shape is configured, the models of the
+        # capability registry. The list is sorted, so the hello of a
+        # worker does not depend on the order of two registries.
+        models = set(self._registry.model_ids())
+        models.update(self._embed_runtime.model_ids())
         capabilities = {
             "device": "cpu",
             "extras": list(self._installed_extras),
-            "models": list(self._registry.model_ids()),
+            "models": sorted(models),
         }
         with self._lock:
             self._write(

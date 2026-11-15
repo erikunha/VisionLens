@@ -52,9 +52,9 @@ from ..encoders.siglip2 import Siglip2Encoder
 from ..encoders.weights import model_directory
 from ..errors import LibraryErrorCode, ModelRunFailedError
 from ..io.decode import DecodeService
-from ..io.preprocess import PreprocessingSpec
-from ..registry.loader import ModelCapabilityRegistry, load_model_registry
-from ..registry.record import ModelRecord
+from ..io.preprocess import PreprocessingSpec, spec_of_record
+from ..registry.loader import ModelCapabilityRegistry, ModelRegistryError, load_model_registry
+from ..registry.record import ModelRecord, ModelRecordError
 from ..runtime.device import DevicePlan, DevicePlanner
 from .batching import BatchScheduler
 from .embedder import EmbedAsset, EmbedRequest, EmbedResult, VisionEmbedder
@@ -99,6 +99,22 @@ SAMPLE_MESSAGES: Mapping[str, str] = {
 
 #: The message of an error sample of a code this module does not name.
 UNKNOWN_SAMPLE_MESSAGE = "the asset could not be embedded"
+
+
+class EmbedRuntimeError(ModelRunFailedError):
+    """A failure of the runtime of the recorded shape, with its reason.
+
+    The REASON is the stable name of the condition, and it carries no
+    path. The message of the library error names the path of the machine,
+    so the refusal that crosses the wire names the condition instead: the
+    logs and the traces of this platform record hashes and ids and never
+    the local paths of the user
+    (`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 def sample_message(code: str) -> str:
@@ -193,8 +209,11 @@ class VisionEmbedService:
 
     The service owns what is expensive and what is shared: the registry
     is read once, and the model is built once and reused by the runs that
-    follow. The mutex is what makes that safe, because the worker serves
-    a request in a thread of its own.
+    follow. The mutex of the service guards the CACHE, and the adapter
+    guards the LOAD of the model: the two are different locks, because
+    the load of the model happens inside the adapter and not inside the
+    service. The worker serves a request in a thread of its own, and two
+    requests that arrive at the same time must not build two models.
     """
 
     def __init__(
@@ -214,7 +233,7 @@ class VisionEmbedService:
         self._registry = registry
         self._scheduler = scheduler
         self._lock = threading.Lock()
-        self._encoders: Dict[Tuple[str, str], Encoder] = {}
+        self._encoders: Dict[Tuple[str, str, str], Encoder] = {}
         self._specs: Dict[Tuple[str, str], PreprocessingSpec] = {}
 
     @property
@@ -282,26 +301,56 @@ class VisionEmbedService:
         """
         registry = self._registry
         if registry is None:
-            registry = load_model_registry(str(self._config.registry_path))
-            self._registry = registry
+            with self._lock:
+                # The registry is read once, even when two requests arrive
+                # at the same time: the file is read under the lock, so
+                # the second thread waits for the first and not for the
+                # file.
+                registry = self._registry
+                if registry is None:
+                    registry = load_model_registry(str(self._config.registry_path))
+                    self._registry = registry
         return registry.resolve(model_id)
+
+    def model_ids(self) -> Tuple[str, ...]:
+        """The model ids of the capability registry, sorted.
+
+        A registry that cannot be read names NONE: the hello of the worker
+        must never fail because a file of the environment is broken. The
+        refusal of a run that needs the registry comes later, and it names
+        the condition.
+        """
+        try:
+            registry = self._registry
+            if registry is None:
+                registry = load_model_registry(str(self._config.registry_path))
+                self._registry = registry
+            return registry.model_ids()
+        except (ModelRegistryError, ModelRecordError, OSError):
+            return ()
 
     def _encoder(self, record: ModelRecord, plan: DevicePlan) -> Encoder:
         """The adapter of a record, built once and reused.
+
+        The cache is keyed by the DEVICE too: an adapter carries the
+        device it was built for, and an adapter built for another device
+        would run the model somewhere else than the run asked for.
 
         @raises ModelRunFailedError when this build has no adapter for the
             feature extractor of the record.
         """
         factory = self._factories.get(record.feature_extractor)
         if factory is None:
-            raise ModelRunFailedError(
+            raise EmbedRuntimeError(
+                "this build has no adapter for the feature extractor of the model, "
+                "and a model without an adapter is a model that cannot be run",
                 "this build has no adapter for the feature extractor '"
                 + record.feature_extractor
                 + "' of the model '"
                 + record.model_id
-                + "', and a model without an adapter is a model that cannot be run"
+                + "', and a model without an adapter is a model that cannot be run",
             )
-        key = (record.model_id, record.revision)
+        key = (record.model_id, record.revision, plan.device)
         with self._lock:
             encoder = self._encoders.get(key)
             if encoder is None:
@@ -312,8 +361,16 @@ class VisionEmbedService:
     def _spec(self, record: ModelRecord) -> PreprocessingSpec:
         """The preprocessing of a record, read once and reused.
 
+        The specification is the one of the RECORD: the record names the
+        fingerprint of the preprocessing it was measured with, and a
+        directory whose configuration carries another one is refused
+        instead of being run. The weights are verified by the adapter
+        and the configuration by this method, and a model is the two of
+        them.
+
         @raises ModelRunFailedError when the model directory carries no
-            preprocessing configuration.
+            preprocessing configuration, or one that the record does not
+            pin.
         """
         key = (record.model_id, record.revision)
         with self._lock:
@@ -324,21 +381,27 @@ class VisionEmbedService:
         try:
             payload = json.loads(path.read_text(encoding="utf8"))
         except OSError as exc:
-            raise ModelRunFailedError(
+            raise EmbedRuntimeError(
                 "the model directory carries no readable preprocessing "
-                "configuration, and a run without a preprocessing is not a run"
+                "configuration, and a run without a preprocessing is not a run",
+                "the model directory carries no readable preprocessing "
+                "configuration, and a run without a preprocessing is not a run",
             ) from exc
         except ValueError as exc:
-            raise ModelRunFailedError(
+            raise EmbedRuntimeError(
                 "the preprocessing configuration of the model is not valid JSON, "
-                "and a run without a preprocessing is not a run"
+                "and a run without a preprocessing is not a run",
+                "the preprocessing configuration of the model is not valid JSON, "
+                "and a run without a preprocessing is not a run",
             ) from exc
         try:
-            spec = PreprocessingSpec.from_preprocessor_config(payload)
+            spec = spec_of_record(record, payload)
         except (AssertionError, KeyError, TypeError, ValueError) as exc:
-            raise ModelRunFailedError(
-                "the preprocessing configuration of the model does not describe a "
-                "preprocessing, and a run without a preprocessing is not a run"
+            raise EmbedRuntimeError(
+                "the preprocessing of the model directory is not the preprocessing "
+                "the record pins, and a run with another preprocessing is not the "
+                "run the record describes",
+                str(exc),
             ) from exc
         with self._lock:
             self._specs[key] = spec
@@ -368,6 +431,17 @@ class EmbedRuntime:
     def available(self) -> bool:
         """Whether this worker can serve the recorded shape."""
         return self.service is not None
+
+    def model_ids(self) -> Tuple[str, ...]:
+        """The model ids the recorded shape may serve, sorted.
+
+        They are the models of the capability registry, and they are the
+        ones the hello of the worker advertises: a worker that serves a
+        model nobody was told about is a worker that serves a surprise.
+        """
+        if self.service is None:
+            return ()
+        return self.service.model_ids()
 
     def refusal(self) -> str:
         """Why this worker cannot serve the recorded shape."""

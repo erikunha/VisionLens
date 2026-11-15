@@ -17,6 +17,8 @@ asks for a run nobody can serve.
 from __future__ import annotations
 
 import hashlib
+import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Tuple
@@ -28,14 +30,16 @@ from .errors import (
     LibraryError,
     MissingExtraError,
     ModelRunFailedError,
+    NetworkAccessRefusedError,
     ResourceExhaustedError,
     UnsupportedDeviceError,
     WorkerError,
 )
 from .inference.embedder import EmbedAsset, EmbedRequest
-from .inference.service import EmbedRuntime, recorded_result
+from .inference.service import EmbedRuntime, EmbedRuntimeError, recorded_result
 from .registry import ModelRegistry, ModelSpec, UnknownModelError
 from .registry.loader import ModelNotFoundError, ModelRegistryError
+from .registry.record import ModelRecordError
 
 #: The frozen label set the simulated predictor draws from.
 LABELS: Tuple[str, ...] = ("label.bicycle", "label.boat", "label.cat", "label.dog", "label.plane")
@@ -220,6 +224,19 @@ def run_simulated_embed(params: Mapping[str, object], ctx: OperationContext) -> 
 #: nobody agreed on cannot be interpreted.
 _ASSET_FIELDS: Tuple[str, ...] = ("assetId", "path")
 
+#: The shape a field name may have before it is named in a refusal. A
+#: name the caller sent is its own data and it is not echoed back unless
+#: it is a plain name: a refusal is a line that a host may log, and a
+#: name with a newline in it would write a line of its own.
+_SAFE_FIELD_NAME = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+
+
+def _safe_field_name(field: object) -> str:
+    """The name of an unknown field, when it is safe to name it."""
+    if isinstance(field, str) and _SAFE_FIELD_NAME.match(field):
+        return ": " + field
+    return ""
+
 
 def _recorded_assets(params: Mapping[str, object]) -> Tuple[Tuple[EmbedAsset, ...], str]:
     """The assets of a recorded run, and the snapshot it belongs to.
@@ -242,7 +259,8 @@ def _recorded_assets(params: Mapping[str, object]) -> Tuple[Tuple[EmbedAsset, ..
             if field not in _ASSET_FIELDS:
                 raise WorkerError(
                     ErrorCode.MALFORMED_FRAME,
-                    where + " carries a field the operation does not define: " + field,
+                    where + " carries a field the operation does not define"
+                    + _safe_field_name(field),
                 )
         asset_id = item.get("assetId")
         path = item.get("path")
@@ -282,6 +300,12 @@ def _wire_failure(failure: Exception) -> WorkerError:
             ErrorCode.WORKER_CRASHED,
             "the capability registry of this worker cannot be read",
         )
+    if isinstance(failure, ModelRecordError):
+        return WorkerError(
+            ErrorCode.WORKER_CRASHED,
+            "the capability registry of this worker carries a record that cannot "
+            "be read",
+        )
     if isinstance(failure, MissingExtraError):
         return WorkerError(
             ErrorCode.MISSING_EXTRA,
@@ -294,10 +318,26 @@ def _wire_failure(failure: Exception) -> WorkerError:
             "the device of this request is not a device this build may run on",
         )
     if isinstance(failure, EmbeddingRunEmptyError):
+        # The samples of the refusals travel with the library error, and the
+        # CODE of each sample is what the caller acts on. The path and the
+        # message of the sample do not travel: the path of the machine is
+        # not the business of the caller.
+        codes = sorted({sample[2] for sample in failure.samples})
+        detail = ""
+        if codes:
+            count = len(failure.samples)
+            detail = (
+                " ("
+                + str(count)
+                + (" asset: " if count == 1 else " assets: ")
+                + ", ".join(codes)
+                + ")"
+            )
         return WorkerError(
             ErrorCode.MALFORMED_FRAME,
-            "the run embedded nothing: every asset of the run was refused, and a "
-            "run that embedded nothing is not a run",
+            "the run embedded nothing: every asset of the run was refused"
+            + detail
+            + ", and a run that embedded nothing is not a run",
         )
     if isinstance(failure, ResourceExhaustedError):
         return WorkerError(
@@ -306,14 +346,29 @@ def _wire_failure(failure: Exception) -> WorkerError:
             "back off",
         )
     if isinstance(failure, ModelRunFailedError):
+        if isinstance(failure, EmbedRuntimeError):
+            # The runtime names the condition with its reason, and the
+            # reason carries no path: the message of the library error
+            # names the path of the machine.
+            return WorkerError(ErrorCode.WORKER_CRASHED, failure.reason)
         return WorkerError(
             ErrorCode.WORKER_CRASHED,
             "the model refused the run, and the worker keeps serving",
         )
-    if isinstance(failure, LibraryError):
+    if isinstance(failure, NetworkAccessRefusedError):
         return WorkerError(
-            ErrorCode.MALFORMED_FRAME,
-            "the runtime of the adapter refused this run",
+            ErrorCode.PROVIDER_UNAVAILABLE,
+            "the run reached for the network and the guard refused it, and the "
+            "worker keeps serving",
+        )
+    if isinstance(failure, LibraryError):
+        # A failure of the runtime is not a failure of the FRAME: the
+        # request was well formed and the adapter could not serve it. It
+        # is a failure of the worker and not a refusal of the caller.
+        return WorkerError(
+            ErrorCode.WORKER_CRASHED,
+            "the runtime of the adapter refused this run, and the worker keeps "
+            "serving",
         )
     return WorkerError(
         ErrorCode.WORKER_CRASHED,
@@ -350,7 +405,13 @@ def run_recorded_embed(params: Mapping[str, object], ctx: OperationContext) -> d
         # failures of the model and they are not mapped.
         raise
     except Exception as exc:
-        raise _wire_failure(exc) from None
+        refusal = _wire_failure(exc)
+        LOG.warning(
+            "the recorded run of vision.embed failed (%s): %s",
+            exc.__class__.__name__,
+            refusal.message,
+        )
+        raise refusal from None
     return recorded_result(result)
 
 
@@ -480,6 +541,14 @@ def run_train(params: Mapping[str, object], ctx: OperationContext) -> dict[str, 
         "metrics": metrics,
     }
 
+
+#: The log of the worker. A failure of the real runtime is logged with
+#: the CLASS of the failure and with the message of the wire refusal, and
+#: never with the message of the library error: that one carries the path
+#: of the machine, and the logs of this platform record hashes and ids
+#: instead of the local paths of the user
+#: (`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+LOG = logging.getLogger("visionlens.worker")
 
 #: The frozen operation table: every advertised operation has one handler.
 OPERATION_HANDLERS: dict[

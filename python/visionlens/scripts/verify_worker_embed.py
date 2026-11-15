@@ -250,6 +250,8 @@ def main() -> int:
     print("artifact digest:", payload.get("artifactSha256"))
     print("error samples:", len(payload.get("errorSamples", [])))
     print("progress frames:", len(progress))
+    for frame in progress:
+        print("progress:", frame.get("completed"), "of", frame.get("total"))
     print("vectors digest of the set:", digest)
 
     for failure in failures:
