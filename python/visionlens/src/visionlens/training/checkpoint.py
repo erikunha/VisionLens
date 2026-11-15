@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
 
 from ..hashing import sha256_of_bytes, sha256_of_file
-from .probe import ClassMap, ProbeModel
+from .probe import ClassMap, ProbeError, ProbeModel
 
 #: The version of the shape of a checkpoint and of its manifest.
 CHECKPOINT_VERSION = "1.0.0"
@@ -332,7 +332,16 @@ def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
             "manifest.checkpointFile",
             "the checkpoint is not an object",
         )
-    model = ProbeModel.from_dict(payload.get("model", {}))
+    try:
+        model = ProbeModel.from_dict(payload.get("model", {}))
+    except ProbeError as error:
+        # The refusal is a refusal of the CHECKPOINT and not of the probe:
+        # a caller of the checkpoint catches one vocabulary and not the other.
+        raise CheckpointError(
+            "CHECKPOINT_FILE_INVALID",
+            "manifest.checkpointFile",
+            f"the checkpoint does not carry a model of a probe: {error.reason}",
+        ) from error
     epoch = payload.get("epoch")
     fingerprint = payload.get("recipeFingerprint")
     if epoch != manifest.epoch:

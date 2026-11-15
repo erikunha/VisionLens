@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Tuple
 import pytest
 
 from visionlens.errors import MissingExtraError
-from visionlens.hashing import sha256_of_file
+from visionlens.hashing import sha256_of_bytes, sha256_of_file
 from visionlens.training.checkpoint import (
     CHECKPOINT_VERSION,
     CheckpointError,
@@ -465,3 +465,32 @@ def test_a_class_map_whose_indices_disagree_is_refused() -> None:
         )
 
     assert failure.value.code == "PROBE_CLASS_SPACE_INVALID"
+
+def test_a_checkpoint_that_carries_no_model_is_refused_by_the_checkpoint(
+    tmp_path: Path,
+) -> None:
+    """The refusal of a checkpoint speaks the vocabulary of the checkpoint.
+
+    The digest of the file is the digest of the bytes of the manifest, so
+    the payload is reached with a manifest that names the payload it has.
+    """
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    manifest = write_checkpoint(
+        tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint
+    )
+    checkpoint_path = tmp_path / manifest.checkpoint_file
+    payload = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+    payload.pop("model")
+    body = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    checkpoint_path.write_bytes(body)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["checkpointSha256"] = sha256_of_bytes(body)
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_FILE_INVALID"
+
