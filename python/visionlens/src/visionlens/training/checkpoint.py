@@ -177,6 +177,30 @@ def _written_atomically(path: Path, payload: bytes) -> None:
         if os.path.exists(temporary):
             os.unlink(temporary)
         raise
+    _flushed_directory(directory)
+
+
+def _flushed_directory(directory: Path) -> None:
+    """Flushes the directory of a publication, so the rename survives a crash.
+
+    The rename is atomic for a READER: it sees the old file or the new one.
+    It is the flush of the DIRECTORY that makes the new name survive a crash
+    of the machine, and a checkpoint that vanishes with the crash is a
+    checkpoint the run never published.
+
+    A platform that refuses to flush a directory still published the file,
+    so the refusal is not an error of the publication and it is not raised.
+    """
+    try:
+        handle = os.open(str(directory), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(handle)
+    except OSError:
+        return
+    finally:
+        os.close(handle)
 
 
 def write_checkpoint(
