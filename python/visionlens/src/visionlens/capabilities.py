@@ -26,16 +26,37 @@ CAPABILITIES_SCHEMA_VERSION = 1
 
 # The modules each declared extra needs, by capability. The requirement
 # RANGES live in pyproject.toml; this map names what the environment is asked
-# about. The `all` extra is the union of the four capabilities.
+# about. The `all` extra is the union of the extras it installs, and not the
+# union of every capability: the aggregate installs the self references of
+# the distribution and nothing else.
+#
+# Every module named here is a module the extra INSTALLS: a map that named a
+# module the extra does not carry would report the extra as absent on a
+# machine that installed it, and the report is what a caller reads to know
+# what this build can do. The `training` extra carries the estimator stack
+# (scikit-learn, numpy and the reader of the frozen features, joblib) and
+# NOT torch: the estimator of the M0 rung is a scikit-learn logistic
+# regression over the frozen vectors of the encoder, and the torch of the
+# platform belongs to the encoder, behind the `vision` extra.
 EXTRA_CAPABILITY_MODULES: Mapping[str, tuple[str, ...]] = {
     "vision": ("torch", "transformers"),
-    "training": ("torch", "sklearn"),
+    "training": ("sklearn", "numpy", "joblib"),
     "agents": ("langgraph",),
     "server": ("fastapi", "uvicorn"),
 }
 
 #: Every declared extra, in the order the distribution declares them.
 EXTRA_NAMES: tuple[str, ...] = ("vision", "training", "agents", "server", "all")
+
+#: The extras that the aggregate extra carries.
+#:
+#: The aggregate installs the self references that the distribution declares,
+#: and nothing else. An aggregate that named the stack of an extra it does
+#: not install reports itself absent on a machine that installed it, and a
+#: report that says that the build cannot do what it can do is a report that
+#: lies. The test that reads the `pyproject.toml` proves that this tuple is
+#: the union of the extras the distribution really declares.
+ALL_EXTRAS: tuple[str, ...] = ("vision", "training")
 
 
 class ExtraCapability(BaseModel):
@@ -94,7 +115,7 @@ def resolve_device(device: str) -> tuple[str, str]:
 def _modules_for(extra: str) -> tuple[str, ...]:
     if extra == "all":
         modules: list[str] = []
-        for name in ("vision", "training", "agents", "server"):
+        for name in ALL_EXTRAS:
             for module in EXTRA_CAPABILITY_MODULES[name]:
                 if module not in modules:
                     modules.append(module)
