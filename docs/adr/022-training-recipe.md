@@ -102,9 +102,14 @@ of the tree recorded below.
      refusals and names the path of the field IN THE REGISTRY FILE, so a
      caller learns what to fix.
    - the recipe refuses a SPLIT whose partitions share an item id, and it
-     names the partitions that touch and the items they share. The leak is
-     the one thing that makes every number of a run a number of the
-     training set, and it is invisible in the metrics.
+     names the partitions that touch and the items they share. The ids are
+     compared in their normalized form, so an item that hides in a
+     difference of case or of whitespace is caught too. The leak is the one
+     thing that makes every number of a run a number of the training set,
+     and it is invisible in the metrics.
+   - the recipe refuses a PARTITION that holds no item, because the other
+     side refuses one and a recipe the other side refuses is a recipe that
+     never reaches a trainer.
    - the recipe refuses a CLASS whose weight is not documented, and it
      refuses a weight for a class the ontology does not have. A weight may
      be `none`, and `none` is a documented decision and not a missing one. A
@@ -123,7 +128,9 @@ of the tree recorded below.
    - the recipe refuses a pin field that carries no value, and it inherits
      the exemption of the record for the fields the record lets be empty. A
      rule the recipe holds to a stricter shape than the record is a rule
-     that refuses a model the platform is allowed to run.
+     that refuses a model the platform is allowed to run. The check lives
+     with the pin, so the resolver and the reader judge the same field the
+     same way.
 6. The ontology version is the digest of the CLASS SPACE: the sorted label
    keys of the ontology, which the probe answers with. It is not the digest
    of the taxonomy prose: the prose is the concern of the prompt of the

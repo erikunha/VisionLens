@@ -250,6 +250,103 @@ def test_the_leakage_guard_refuses_a_val_item_that_sits_in_test(
     assert failure.value.field == "partitions.val/test"
 
 
+def test_the_leakage_guard_refuses_an_item_that_hides_in_the_case(tmp_path: Path) -> None:
+    """An item that differs only in the case is the same item.
+
+    A leak that hides in a difference of the letters is a leak nobody sees
+    in the metrics, and the guard compares the ids in their normalized
+    form.
+    """
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    leaking = copy.deepcopy(split)
+    train_item = next(a for a in leaking["assignments"] if a["split"] == "train")
+    leaking["assignments"].append(
+        {**train_item, "id": train_item["id"].swapcase(), "split": "test"}
+    )
+    target = tmp_path / "leaking-case.json"
+    target.write_text(json.dumps(leaking), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_PARTITION_LEAKAGE"
+    assert failure.value.field == "partitions.train/test"
+
+
+def test_the_leakage_guard_refuses_an_item_that_hides_in_the_whitespace(
+    tmp_path: Path,
+) -> None:
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    leaking = copy.deepcopy(split)
+    train_item = next(a for a in leaking["assignments"] if a["split"] == "train")
+    leaking["assignments"].append(
+        {**train_item, "id": train_item["id"] + " ", "split": "test"}
+    )
+    target = tmp_path / "leaking-space.json"
+    target.write_text(json.dumps(leaking), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_PARTITION_LEAKAGE"
+    assert failure.value.field == "partitions.train/test"
+
+
+def test_a_partition_with_no_item_is_refused(tmp_path: Path) -> None:
+    """A recipe may not pin a partition that is empty.
+
+    The other side refuses a partition with no item, and a recipe the
+    other side refuses is a recipe that never reaches a trainer.
+    """
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    emptied = copy.deepcopy(split)
+    emptied["assignments"] = [
+        a for a in emptied["assignments"] if a["split"] != "test"
+    ]
+    target = tmp_path / "empty-test.json"
+    target.write_text(json.dumps(emptied), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_SPLIT_INVALID"
+    assert failure.value.field == "partitions.test"
+
+
+def test_a_split_without_the_fingerprint_of_its_snapshot_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The data pin names the snapshot, and a recipe may not invent it."""
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    without = copy.deepcopy(split)
+    del without["partitionFingerprint"]
+    target = tmp_path / "without-fingerprint.json"
+    target.write_text(json.dumps(without), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_DATASET_FIELD_MISSING"
+    assert failure.value.field == "dataset.snapshotFingerprint"
+
+
+def test_a_record_with_an_empty_field_the_pin_needs_is_refused() -> None:
+    """A pin field with no value is a field the run does not pin.
+
+    The other side refuses such a recipe, and the read-back path refuses
+    it too, so the two sides judge the same wire form the same way.
+    """
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["encoder"]["featureExtractor"] = ""
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_ENCODER_FIELD_MISSING"
+    assert failure.value.field == "encoder.featureExtractor"
+
+
 def test_the_floating_revision_is_refused_and_names_the_field(tmp_path: Path) -> None:
     record = tracked_model()
     record["revision"] = "latest"

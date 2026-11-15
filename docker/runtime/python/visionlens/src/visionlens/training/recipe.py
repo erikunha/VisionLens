@@ -328,6 +328,27 @@ def _read_json(path: str) -> Any:
         ) from error
 
 
+def _checked_pin(pin: EncoderPin) -> EncoderPin:
+    """The pin, checked against the fields it has to carry.
+
+    A pin field with no value is a field of the encoder the run does not
+    pin, and the other side refuses such a recipe. The fields the record
+    lets be empty are exempt, because a rule the recipe holds to a
+    stricter shape than the record refuses a model the platform may run.
+    """
+    for name in ENCODER_PIN_FIELDS:
+        if name in EMPTY_ALLOWED_PIN_FIELDS:
+            continue
+        value = pin.to_dict()[name]
+        _require(
+            value not in (None, "", [], (), {}),
+            "RECIPE_ENCODER_FIELD_MISSING",
+            f"encoder.{name}",
+            "the record carries no value for this field, and a recipe may not invent one",
+        )
+    return pin
+
+
 def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
     """The pin of a resolved registry record.
 
@@ -340,41 +361,29 @@ def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
     # recipe inherits that refusal: a rule that is checked twice is a rule
     # that is checked in two places and drifts.
     width, height = record.input_image_size
-    pin = EncoderPin(
-        model_id=record.model_id,
-        revision=record.revision,
-        source_uri=record.source_uri,
-        source_digest=record.source_digest,
-        license=record.license,
-        license_url=record.license_url,
-        commercial_use=record.commercial_use,
-        usage_restrictions=record.usage_restrictions,
-        required_extras=tuple(record.required_extras),
-        tasks=tuple(record.tasks),
-        preprocessing_fingerprint=record.preprocessing_fingerprint,
-        device_support=tuple(record.device_support),
-        input_image_size={"width": width, "height": height},
-        feature_extractor=record.feature_extractor,
-        output_shape={"dimension": record.output_dimension},
-        latency_cost_profile=record.latency_cost_profile,
-        calibration_status=record.calibration_status,
-        trust_policy=record.trust_policy,
-        attribution=record.attribution,
-    )
-    for name in ENCODER_PIN_FIELDS:
-        value = pin.to_dict()[name]
-        if name in EMPTY_ALLOWED_PIN_FIELDS:
-            # The record lets this field be empty, and the pin inherits the
-            # rule instead of holding the pin to a stricter one.
-            continue
-        _require(
-            value not in (None, "", [], (), {}),
-            "RECIPE_ENCODER_FIELD_MISSING",
-            f"encoder.{name}",
-            "the registry record carries no value for this field, and a recipe may not "
-            "invent one",
+    return _checked_pin(
+        EncoderPin(
+            model_id=record.model_id,
+            revision=record.revision,
+            source_uri=record.source_uri,
+            source_digest=record.source_digest,
+            license=record.license,
+            license_url=record.license_url,
+            commercial_use=record.commercial_use,
+            usage_restrictions=record.usage_restrictions,
+            required_extras=tuple(record.required_extras),
+            tasks=tuple(record.tasks),
+            preprocessing_fingerprint=record.preprocessing_fingerprint,
+            device_support=tuple(record.device_support),
+            input_image_size={"width": width, "height": height},
+            feature_extractor=record.feature_extractor,
+            output_shape={"dimension": record.output_dimension},
+            latency_cost_profile=record.latency_cost_profile,
+            calibration_status=record.calibration_status,
+            trust_policy=record.trust_policy,
+            attribution=record.attribution,
         )
-    return pin
+    )
 
 
 def _partitions_of(split: Mapping[str, Any]) -> Dict[str, Tuple[str, ...]]:
@@ -409,7 +418,25 @@ def _partitions_of(split: Mapping[str, Any]) -> Dict[str, Tuple[str, ...]]:
             "an assignment must name its item",
         )
         partitions[split_name].append(item_id)
+    for name, ids in partitions.items():
+        _require(
+            len(ids) > 0,
+            "RECIPE_SPLIT_INVALID",
+            f"partitions.{name}",
+            f"the partition holds no item, and a recipe may not pin a partition that "
+            "is empty",
+        )
     return {name: tuple(ids) for name, ids in partitions.items()}
+
+
+def _normalized_id(item_id: str) -> str:
+    """The id of an item, in the form two partitions are compared by.
+
+    Two ids that name the same item differ in the whitespace around them
+    and in the case of the letters, and a leak that hides in that
+    difference is a leak nobody sees.
+    """
+    return item_id.strip().casefold()
 
 
 def _refuse_leakage(partitions: Mapping[str, Tuple[str, ...]]) -> None:
@@ -420,7 +447,15 @@ def _refuse_leakage(partitions: Mapping[str, Tuple[str, ...]]) -> None:
     the partitions that touch and the items they share.
     """
     for first, second in (("train", "test"), ("val", "test"), ("train", "val")):
-        shared = sorted(set(partitions[first]) & set(partitions[second]))
+        # The ids are compared in their normalized form, so an item that
+        # hides in a difference of case or of whitespace is caught too, and
+        # the refusal names the id as the split carries it.
+        of_second = {_normalized_id(item_id) for item_id in partitions[second]}
+        shared = sorted(
+            item_id
+            for item_id in partitions[first]
+            if _normalized_id(item_id) in of_second
+        )
         if shared:
             shown = ", ".join(shared[:5])
             more = "" if len(shared) <= 5 else f" (and {len(shared) - 5} more)"
@@ -644,29 +679,33 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
             name,
             "the recipe record carries no such field",
         )
-    encoder = EncoderPin(
-        model_id=str(record["encoder"]["modelId"]),
-        revision=str(record["encoder"]["revision"]),
-        source_uri=str(record["encoder"]["sourceUri"]),
-        source_digest=str(record["encoder"]["sourceDigest"]),
-        license=str(record["encoder"]["license"]),
-        license_url=str(record["encoder"]["licenseUrl"]),
-        commercial_use=bool(record["encoder"]["commercialUse"]),
-        usage_restrictions=str(record["encoder"]["usageRestrictions"]),
-        required_extras=tuple(record["encoder"]["requiredExtras"]),
-        tasks=tuple(record["encoder"]["tasks"]),
-        preprocessing_fingerprint=str(record["encoder"]["preprocessingFingerprint"]),
-        device_support=tuple(record["encoder"]["deviceSupport"]),
-        input_image_size={
-            "width": int(record["encoder"]["inputImageSize"]["width"]),
-            "height": int(record["encoder"]["inputImageSize"]["height"]),
-        },
-        feature_extractor=str(record["encoder"]["featureExtractor"]),
-        output_shape={"dimension": int(record["encoder"]["outputShape"]["dimension"])},
-        latency_cost_profile=str(record["encoder"]["latencyCostProfile"]),
-        calibration_status=str(record["encoder"]["calibrationStatus"]),
-        trust_policy=str(record["encoder"]["trustPolicy"]),
-        attribution=str(record["encoder"]["attribution"]),
+    encoder = _checked_pin(
+        EncoderPin(
+            model_id=str(record["encoder"]["modelId"]),
+            revision=str(record["encoder"]["revision"]),
+            source_uri=str(record["encoder"]["sourceUri"]),
+            source_digest=str(record["encoder"]["sourceDigest"]),
+            license=str(record["encoder"]["license"]),
+            license_url=str(record["encoder"]["licenseUrl"]),
+            commercial_use=bool(record["encoder"]["commercialUse"]),
+            usage_restrictions=str(record["encoder"]["usageRestrictions"]),
+            required_extras=tuple(record["encoder"]["requiredExtras"]),
+            tasks=tuple(record["encoder"]["tasks"]),
+            preprocessing_fingerprint=str(record["encoder"]["preprocessingFingerprint"]),
+            device_support=tuple(record["encoder"]["deviceSupport"]),
+            input_image_size={
+                "width": int(record["encoder"]["inputImageSize"]["width"]),
+                "height": int(record["encoder"]["inputImageSize"]["height"]),
+            },
+            feature_extractor=str(record["encoder"]["featureExtractor"]),
+            output_shape={
+                "dimension": int(record["encoder"]["outputShape"]["dimension"])
+            },
+            latency_cost_profile=str(record["encoder"]["latencyCostProfile"]),
+            calibration_status=str(record["encoder"]["calibrationStatus"]),
+            trust_policy=str(record["encoder"]["trustPolicy"]),
+            attribution=str(record["encoder"]["attribution"]),
+        )
     )
     dataset = DatasetPin(
         dataset_id=str(record["dataset"]["datasetId"]),
