@@ -13,6 +13,26 @@ are lazy: importing the training surface never imports the heavy stack.
 
 from __future__ import annotations
 
+from .checkpoint import (
+    CHECKPOINT_VERSION,
+    CheckpointError,
+    CheckpointManifest,
+    LoadedCheckpoint,
+    checkpoint_digest,
+    read_checkpoint,
+    write_checkpoint,
+)
+from .probe import (
+    MIN_CLASS_SUPPORT,
+    NO_WEIGHT,
+    REQUIRED_EXTRA,
+    ClassMap,
+    ProbeError,
+    ProbeModel,
+    class_map_from_recipe,
+    fit_probe,
+    fit_probe_from_recipe,
+)
 from .recipe import (
     RECIPE_VERSION,
     RecipeError,
@@ -26,13 +46,29 @@ from .recipe import (
 )
 
 __all__ = [
+    "CHECKPOINT_VERSION",
+    "MIN_CLASS_SUPPORT",
+    "NO_WEIGHT",
     "RECIPE_VERSION",
+    "REQUIRED_EXTRA",
+    "CheckpointError",
+    "CheckpointManifest",
+    "ClassMap",
+    "LoadedCheckpoint",
+    "ProbeError",
+    "ProbeModel",
     "RecipeError",
     "TrainRecipe",
+    "checkpoint_digest",
+    "class_map_from_recipe",
     "default_class_weights",
+    "fit_probe",
+    "fit_probe_from_recipe",
     "ontology_version_of",
     "partition_fingerprint_of",
+    "read_checkpoint",
     "recipe_fingerprint",
     "recipe_from_record",
     "resolve_recipe",
+    "write_checkpoint",
 ]
