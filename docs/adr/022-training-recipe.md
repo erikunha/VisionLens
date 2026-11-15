@@ -181,6 +181,19 @@ of the tree recorded below.
    boundary table of `AGENTS.md` gained a row, the eslint zone gained the
    rule, and the boundary gate plants a violating training fixture and
    proves the rule fires.
+9. The recipe has a GENERATED schema, the same mechanism the manifest of
+   the adapter uses. The committed file
+   (`packages/core/src/training/train-recipe.schema.json`) is generated from
+   the same Zod schema the TypeScript side validates with, the CI proves the
+   committed file does not drift from it, and the Python side validates the
+   recipe it publishes against that file. The shape of the recipe is a rule
+   that lives in one language, and a rule that is written twice is a rule
+   that drifts: the two sides refused different recipes until the shape came
+   from one place.
+10. The JSON Schema validator of the Python side lives in one module
+    (`visionlens/jsonschema.py`) and serves both contracts that cross the
+    boundary, the manifest of the artifact and the recipe of a run. A
+    validator that is written twice is a validator that drifts.
 
 ## Consequences
 
