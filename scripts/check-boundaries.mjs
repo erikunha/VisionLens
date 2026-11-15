@@ -36,6 +36,7 @@
  * Run: `pnpm run check:boundaries` (repo root). Wired into CI later.
  */
 import { spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -156,13 +157,38 @@ const FACADE_CLEAN = `import { createHash } from 'node:crypto';
 import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
 import { WorkerClient } from '../worker/index.js';
 import type { PythonRouteConfig } from '../config/index.js';
+import { validateEmbeddingManifest } from '../adapter/embedding-manifest.js';
 // Clean facade fixture: node stdlib plus contracts plus the worker client
-// plus the types of the route, must lint green.
+// plus the types of the route plus the contract of the manifest, must lint
+// green.
 export const digest = createHash('sha256');
 export const protocol = WORKER_PROTOCOL_ID;
 export const client = WorkerClient;
 export type { PythonRouteConfig };
+export const manifest = validateEmbeddingManifest;
 `;
+
+/**
+ * The ONE module of the adapter the facade may reach.
+ *
+ * The facade validates the artifact with the contract of the manifest, and
+ * with nothing else: the commit of the artifact and the parity gate are the
+ * work of the adapter. The rule of the boundary names the forbidden modules
+ * one by one, because the rule has no way to say "this directory except that
+ * file", and THIS list is what keeps the rule honest: every module of the
+ * adapter that is not named here is planted as a fixture and has to be
+ * refused, so a module added tomorrow cannot slip in without the gate
+ * noticing.
+ */
+const FACADE_ALLOWED_ADAPTER_MODULES = ['embedding-manifest.js'];
+
+/** The modules of the adapter that live in the tree right now. */
+function adapterModules() {
+  const adapterDir = path.join(repoRoot, 'packages', 'core', 'src', 'adapter');
+  return readdirSync(adapterDir)
+    .filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
+    .sort();
+}
 
 /**
  * Lint one fixture from stdin, under a virtual filename.
@@ -279,6 +305,40 @@ try {
     );
   } else {
     console.log('ok: facade clean fixture (node stdlib + contracts + worker) lints green');
+  }
+
+  // Every module of the adapter but the contract of the manifest is refused
+  // inside the facade. The list of the tree is read here, so a module added
+  // tomorrow is planted without touching the rule of the boundary.
+  const modules = adapterModules();
+  const specifiers = modules.map((module) => module.replace(/\.ts$/, '.js'));
+  for (const allowed of FACADE_ALLOWED_ADAPTER_MODULES) {
+    if (!specifiers.includes(allowed)) {
+      failed = true;
+      console.error(
+        `FAIL: the facade is allowed to reach "${allowed}", but the adapter has no such module`,
+      );
+    }
+  }
+  for (const module of modules) {
+    // The tree carries the TypeScript file; the import specifier is the
+    // JavaScript one, the way NodeNext resolves it.
+    const specifier = module.replace(/\.ts$/, '.js');
+    if (FACADE_ALLOWED_ADAPTER_MODULES.includes(specifier)) continue;
+    const fixture = `import * as adapter from '../adapter/${specifier}';
+// Deliberate facade boundary violation fixture: the facade reaches the
+// contract of the manifest and nothing else of the adapter.
+export const adapterModule = adapter;
+`;
+    const result = runEslint(fixture, FACADE_VIOLATING_PATH);
+    if (result.status !== 1) {
+      failed = true;
+      console.error(
+        `FAIL: the facade may not reach the adapter module "${specifier}", eslint exited ${result.status}\n${result.stdout}${result.stderr}`,
+      );
+    } else {
+      console.log(`ok: the adapter module "${specifier}" is rejected inside facade/`);
+    }
   }
 } catch (error) {
   failed = true;

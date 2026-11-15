@@ -42,7 +42,7 @@ const WORKER_BOUNDARY_MESSAGE =
  * image and it does not write to the database itself.
  */
 const FACADE_BOUNDARY_MESSAGE =
-  'packages/core/src/facade/ may import the Node stdlib, @vision-lens/contracts, packages/core/src/config/ (the types of the route), packages/core/src/worker/ and packages/core/src/utils/ only: no LLM SDK, no Sharp, no direct store access, no analyzer, no processor (see the module boundary table in AGENTS.md).';
+  'packages/core/src/facade/ may import the Node stdlib, @vision-lens/contracts, packages/core/src/config/ (the types of the route), packages/core/src/worker/, packages/core/src/utils/ and the contract of the manifest (packages/core/src/adapter/embedding-manifest.js) only: no LLM SDK, no Sharp, no direct store access, no analyzer, no processor and no other module of the adapter (see the module boundary table in AGENTS.md).';
 
 export default [
   js.configs.recommended,
@@ -187,6 +187,23 @@ export default [
             },
             {
               group: ['../processor', '../processor.js', '../processor/*', '../processor/**'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            // The facade validates the artifact with the contract of the
+            // manifest, and with NOTHING else of the adapter: the commit of
+            // the artifact and the parity gate are the work of the adapter,
+            // not of the application service over the worker. The list is
+            // explicit because the rule has no way to name the ONE module of
+            // the adapter the facade may reach; the boundary gate enumerates
+            // the files of the adapter and proves that every one of them but
+            // the contract is refused, so a module added tomorrow cannot slip
+            // in without the gate noticing.
+            {
+              group: [
+                '../adapter/index.js',
+                '../adapter/embedding-commit.js',
+                '../adapter/parity.js',
+              ],
               message: FACADE_BOUNDARY_MESSAGE,
             },
           ],
