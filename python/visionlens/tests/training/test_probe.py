@@ -763,3 +763,78 @@ def test_a_manifest_whose_class_map_is_inconsistent_is_refused(
         read_checkpoint(manifest_path)
 
     assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
+
+
+
+
+def test_a_class_without_a_weight_is_weighted_like_one() -> None:
+    """The word `none` means the class is not weighted, and not that it is
+    weighted differently.
+
+    The class that the recipe documents as `none` is left out of the weights
+    the estimator receives, and the estimator gives it the default of one. A
+    fit that documents the class as `none` is the fit that documents it as
+    one, and the record of the class keeps the word `none`.
+    """
+    recipe = tiny_recipe()
+    class_map = class_map_from_recipe(recipe)
+    without = fit_probe(
+        features=TINY_FEATURES,
+        labels=TINY_LABELS,
+        class_map=class_map,
+        seed=recipe.seed,
+        hyperparameters=recipe.hyperparameters,
+        solver=recipe.optimizer,
+        max_epochs=recipe.max_epochs,
+        class_weights={NORMAL: NO_WEIGHT, DEFECT: NO_WEIGHT},
+    )
+    with_one = fit_probe(
+        features=TINY_FEATURES,
+        labels=TINY_LABELS,
+        class_map=class_map,
+        seed=recipe.seed,
+        hyperparameters=recipe.hyperparameters,
+        solver=recipe.optimizer,
+        max_epochs=recipe.max_epochs,
+        class_weights={NORMAL: 1.0, DEFECT: 1.0},
+    )
+
+    assert without.coefficients == with_one.coefficients
+    assert without.intercepts == with_one.intercepts
+    assert without.class_weights == {DEFECT: NO_WEIGHT, NORMAL: NO_WEIGHT}
+
+
+
+
+def test_the_recorded_hyperparameters_are_the_ones_applied() -> None:
+    """The model records the hyperparameters the fit was made with.
+
+    A record that lies about the fit is a record nobody can reproduce, so the
+    record travels with the parameters it produced.
+    """
+    recipe = tiny_recipe()
+    class_map = class_map_from_recipe(recipe)
+    weak = fit_probe(
+        features=TINY_FEATURES,
+        labels=TINY_LABELS,
+        class_map=class_map,
+        seed=recipe.seed,
+        hyperparameters={"C": 1.0, "maxIterations": 200, "solver": "lbfgs"},
+        solver="lbfgs",
+        max_epochs=200,
+        class_weights=recipe.class_weights,
+    )
+    strong = fit_probe(
+        features=TINY_FEATURES,
+        labels=TINY_LABELS,
+        class_map=class_map,
+        seed=recipe.seed,
+        hyperparameters={"C": 10.0, "maxIterations": 200, "solver": "lbfgs"},
+        solver="lbfgs",
+        max_epochs=200,
+        class_weights=recipe.class_weights,
+    )
+
+    assert weak.hyperparameters["C"] == 1.0
+    assert strong.hyperparameters["C"] == 10.0
+    assert weak.coefficients != strong.coefficients
