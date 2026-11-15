@@ -85,7 +85,7 @@ def test_wheel_installs_into_a_clean_venv_without_node_on_path(
         "assert visionlens.__version__ == '0.1.0'\n"
         "assert (pathlib.Path(visionlens.__file__).parent / 'py.typed').exists()\n"
         "heavy = [m for m in ('torch', 'transformers', 'mlflow', 'langgraph', 'fastapi',"
-        " 'uvicorn', 'scikit-learn') if m in sys.modules]\n"
+        " 'uvicorn', 'sklearn', 'numpy', 'joblib') if m in sys.modules]\n"
         "assert not heavy, heavy\n"
         "print('CLEAN')\n"
     )
