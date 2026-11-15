@@ -55,15 +55,21 @@ of the tree recorded below.
    produces a recipe that carries every field that decides the run: the
    pinned encoder (the exact revision, the digest of the weights, the
    source URI, the licence, the usage restrictions, the required extras, the
-   tasks, the preprocessing fingerprint, the supported devices, the output
-   dimension, the trust policy and the attribution), the pinned data (the
-   dataset, the split, the fingerprint of the partition and the hash of the
-   manifest), the item ids of the three partitions, the version of the
-   ontology, the class weight of every class, the estimator, the optimizer,
-   the hyperparameters, the seed, the device policy, the augmentation
-   pipeline, the ceiling of the epochs, the early stopping criterion, the
-   interval of the checkpoints, the resources, the budget and the version of
-   the contracts.
+   tasks, the preprocessing fingerprint, the supported devices, the size of
+   the input, the feature extractor, the shape of the output, the profile of
+   the latency and the cost, the status of the calibration, the trust policy
+   and the attribution), the pinned data (the dataset, the split, the
+   fingerprint of the partition and the hash of the manifest), the item ids of
+   the three partitions, the version of the ontology, the class weight of
+   every class, the estimator, the optimizer, the hyperparameters, the seed,
+   the device policy, the augmentation pipeline, the ceiling of the epochs,
+   the early stopping criterion, the interval of the checkpoints, the
+   resources, the budget and the version of the contracts.
+   The encoder pin carries EVERY field of the registry record except the
+   notes, under the name the record gives it, so a field of the record that
+   the pin drops is a field of the encoder the run does not pin. The notes
+   are the provenance of the record and not a decision of the run, and they
+   travel with the record.
 2. The recipe is IMMUTABLE and its fingerprint is the `fp2:` digest of
    every field but the fingerprint itself. A recipe whose fingerprint is the
    digest of a name is a promise that nothing is pinned, and a fingerprint
@@ -114,6 +120,10 @@ of the tree recorded below.
    - the recipe refuses a DEVICE the record does not support. The CPU is
      the reference device and a silent fallback is forbidden
      (`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`).
+   - the recipe refuses a pin field that carries no value, and it inherits
+     the exemption of the record for the fields the record lets be empty. A
+     rule the recipe holds to a stricter shape than the record is a rule
+     that refuses a model the platform is allowed to run.
 6. The ontology version is the digest of the CLASS SPACE: the sorted label
    keys of the ontology, which the probe answers with. It is not the digest
    of the taxonomy prose: the prose is the concern of the prompt of the

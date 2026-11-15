@@ -9,15 +9,24 @@ down form, and the fingerprint of the recipe is the `fp2:` digest of the
 whole configuration: a recipe whose fingerprint is the digest of a NAME is
 a promise that nothing is pinned.
 
-The resolver reads two files the repository already ships and refuses four
-things, and every refusal names the field it is about:
+The resolver reads two files the repository already ships and refuses every
+condition that leaves the run unpinned, and every refusal names the field it
+is about:
 
 - a registry record that does not carry a field the recipe needs;
 - a floating revision, because `latest` can never back a saved run;
 - a partition that touches another partition, because the leak makes every
   number of the run a number of the training set;
-- a class whose weight is not documented, because an undocumented weight is
-  a weight nobody chose.
+- a class whose weight is not documented, or a weight for a class the ontology
+  does not have, because an undocumented weight is a weight nobody chose;
+- a device the record does not support, because a silent fallback is
+  forbidden;
+- a split that carries no assignment, no partition or no value for a field of
+  the data pin;
+- a file that cannot be read;
+- a record whose declared address is not the digest of its own body, because a
+  record that claims one configuration and hashes another is a record nobody
+  can reproduce.
 
 The recipe does not train anything and it does not read the weights: it is
 the pinned configuration, and the run that consumes it is a later module.
@@ -79,11 +88,16 @@ RECIPE_FIELDS: Tuple[str, ...] = (
 )
 
 #: The fields the encoder pin carries, and nothing else.
+#:
+#: The list is the record's own list of fields, minus the NOTES: the notes
+#: are the provenance of the record, not a decision of the run, and they
+#: travel with the record. Every other field of the record travels
+#: unchanged, under the name the record gives it.
 ENCODER_PIN_FIELDS: Tuple[str, ...] = (
     "modelId",
     "revision",
     "sourceUri",
-    "weightsDigest",
+    "sourceDigest",
     "license",
     "licenseUrl",
     "commercialUse",
@@ -92,10 +106,18 @@ ENCODER_PIN_FIELDS: Tuple[str, ...] = (
     "tasks",
     "preprocessingFingerprint",
     "deviceSupport",
-    "outputDimension",
+    "inputImageSize",
+    "featureExtractor",
+    "outputShape",
+    "latencyCostProfile",
+    "calibrationStatus",
     "trustPolicy",
     "attribution",
 )
+
+#: The pin fields whose value may be empty, because the record lets them be
+#: empty. The record owns the rule, and the pin inherits it.
+EMPTY_ALLOWED_PIN_FIELDS: Tuple[str, ...] = ("usageRestrictions",)
 
 #: The fields the dataset pin carries, and nothing else.
 DATASET_PIN_FIELDS: Tuple[str, ...] = (
@@ -132,7 +154,7 @@ class EncoderPin:
     model_id: str
     revision: str
     source_uri: str
-    weights_digest: str
+    source_digest: str
     license: str
     license_url: str
     commercial_use: bool
@@ -141,7 +163,11 @@ class EncoderPin:
     tasks: Tuple[str, ...]
     preprocessing_fingerprint: str
     device_support: Tuple[str, ...]
-    output_dimension: int
+    input_image_size: Mapping[str, int]
+    feature_extractor: str
+    output_shape: Mapping[str, int]
+    latency_cost_profile: str
+    calibration_status: str
     trust_policy: str
     attribution: str
 
@@ -151,7 +177,7 @@ class EncoderPin:
             "modelId": self.model_id,
             "revision": self.revision,
             "sourceUri": self.source_uri,
-            "weightsDigest": self.weights_digest,
+            "sourceDigest": self.source_digest,
             "license": self.license,
             "licenseUrl": self.license_url,
             "commercialUse": self.commercial_use,
@@ -160,7 +186,11 @@ class EncoderPin:
             "tasks": list(self.tasks),
             "preprocessingFingerprint": self.preprocessing_fingerprint,
             "deviceSupport": list(self.device_support),
-            "outputDimension": self.output_dimension,
+            "inputImageSize": dict(self.input_image_size),
+            "featureExtractor": self.feature_extractor,
+            "outputShape": dict(self.output_shape),
+            "latencyCostProfile": self.latency_cost_profile,
+            "calibrationStatus": self.calibration_status,
             "trustPolicy": self.trust_policy,
             "attribution": self.attribution,
         }
@@ -301,17 +331,20 @@ def _read_json(path: str) -> Any:
 def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
     """The pin of a resolved registry record.
 
-    Every field of the record travels unchanged: the recipe does not decide
-    what a model is, it decides what a run will use.
+    Every field of the record that decides the run travels unchanged, under
+    the name the record gives it: the recipe does not decide what a model
+    is, it decides what a run will use. The NOTES of the record are the
+    provenance of the record itself, and they travel with the record.
     """
     # The floating revision is refused by the RECORD, in one place, and the
     # recipe inherits that refusal: a rule that is checked twice is a rule
     # that is checked in two places and drifts.
+    width, height = record.input_image_size
     pin = EncoderPin(
         model_id=record.model_id,
         revision=record.revision,
         source_uri=record.source_uri,
-        weights_digest=record.source_digest,
+        source_digest=record.source_digest,
         license=record.license,
         license_url=record.license_url,
         commercial_use=record.commercial_use,
@@ -320,14 +353,22 @@ def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
         tasks=tuple(record.tasks),
         preprocessing_fingerprint=record.preprocessing_fingerprint,
         device_support=tuple(record.device_support),
-        output_dimension=record.output_dimension,
+        input_image_size={"width": width, "height": height},
+        feature_extractor=record.feature_extractor,
+        output_shape={"dimension": record.output_dimension},
+        latency_cost_profile=record.latency_cost_profile,
+        calibration_status=record.calibration_status,
         trust_policy=record.trust_policy,
         attribution=record.attribution,
     )
     for name in ENCODER_PIN_FIELDS:
         value = pin.to_dict()[name]
+        if name in EMPTY_ALLOWED_PIN_FIELDS:
+            # The record lets this field be empty, and the pin inherits the
+            # rule instead of holding the pin to a stricter one.
+            continue
         _require(
-            value not in (None, "", [], ()),
+            value not in (None, "", [], (), {}),
             "RECIPE_ENCODER_FIELD_MISSING",
             f"encoder.{name}",
             "the registry record carries no value for this field, and a recipe may not "
@@ -497,8 +538,9 @@ def resolve_recipe(
 
     The resolver reads the registry and the split, and it refuses a recipe
     that is not pinned: a record without a field the run needs, a floating
-    revision, partitions that touch, a class without a documented weight or
-    a device the record does not support.
+    revision, partitions that touch, a class without a documented weight, a
+    device the record does not support, a split that carries no partition and
+    a file that cannot be read.
 
     @raises RecipeError when the recipe cannot be resolved.
     """
@@ -606,7 +648,7 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
         model_id=str(record["encoder"]["modelId"]),
         revision=str(record["encoder"]["revision"]),
         source_uri=str(record["encoder"]["sourceUri"]),
-        weights_digest=str(record["encoder"]["weightsDigest"]),
+        source_digest=str(record["encoder"]["sourceDigest"]),
         license=str(record["encoder"]["license"]),
         license_url=str(record["encoder"]["licenseUrl"]),
         commercial_use=bool(record["encoder"]["commercialUse"]),
@@ -615,7 +657,14 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
         tasks=tuple(record["encoder"]["tasks"]),
         preprocessing_fingerprint=str(record["encoder"]["preprocessingFingerprint"]),
         device_support=tuple(record["encoder"]["deviceSupport"]),
-        output_dimension=int(record["encoder"]["outputDimension"]),
+        input_image_size={
+            "width": int(record["encoder"]["inputImageSize"]["width"]),
+            "height": int(record["encoder"]["inputImageSize"]["height"]),
+        },
+        feature_extractor=str(record["encoder"]["featureExtractor"]),
+        output_shape={"dimension": int(record["encoder"]["outputShape"]["dimension"])},
+        latency_cost_profile=str(record["encoder"]["latencyCostProfile"]),
+        calibration_status=str(record["encoder"]["calibrationStatus"]),
         trust_policy=str(record["encoder"]["trustPolicy"]),
         attribution=str(record["encoder"]["attribution"]),
     )

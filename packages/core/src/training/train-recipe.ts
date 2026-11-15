@@ -38,7 +38,7 @@ export const EncoderPinSchema = z
     modelId: z.string().min(1),
     revision: z.string().min(1),
     sourceUri: z.string().url(),
-    weightsDigest: z.string().regex(SHA256_PATTERN),
+    sourceDigest: z.string().regex(SHA256_PATTERN),
     license: z.string().min(1),
     licenseUrl: z.string().url(),
     commercialUse: z.boolean(),
@@ -47,7 +47,16 @@ export const EncoderPinSchema = z
     tasks: z.array(z.string().min(1)).min(1),
     preprocessingFingerprint: z.string().regex(FINGERPRINT_PATTERN),
     deviceSupport: z.array(z.string().min(1)).min(1),
-    outputDimension: z.number().int().positive(),
+    inputImageSize: z.strictObject({
+      width: z.number().int().positive(),
+      height: z.number().int().positive(),
+    }),
+    featureExtractor: z.string().min(1),
+    outputShape: z.strictObject({
+      dimension: z.number().int().positive(),
+    }),
+    latencyCostProfile: z.string().min(1),
+    calibrationStatus: z.string().min(1),
     trustPolicy: z.string().min(1),
     attribution: z.string(),
   })

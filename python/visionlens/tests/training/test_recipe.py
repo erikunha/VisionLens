@@ -90,24 +90,23 @@ def tracked_model() -> Dict[str, Any]:
 
 
 def test_the_resolved_recipe_carries_every_registry_field_unchanged() -> None:
+    """Every field of the record travels unchanged, except the notes.
+
+    The pin is the record seen by the run, so a field of the record that
+    the pin drops is a field of the encoder the run does not pin.
+    """
     recipe = resolve_tracked()
     record = tracked_model()
+    pin = recipe.encoder.to_dict()
 
-    assert recipe.encoder.model_id == record["modelId"]
-    assert recipe.encoder.revision == record["revision"]
-    assert recipe.encoder.source_uri == record["sourceUri"]
-    assert recipe.encoder.weights_digest == record["sourceDigest"]
-    assert recipe.encoder.license == record["license"]
-    assert recipe.encoder.license_url == record["licenseUrl"]
-    assert recipe.encoder.commercial_use is record["commercialUse"]
-    assert recipe.encoder.usage_restrictions == record["usageRestrictions"]
-    assert list(recipe.encoder.required_extras) == record["requiredExtras"]
-    assert list(recipe.encoder.tasks) == record["tasks"]
-    assert recipe.encoder.preprocessing_fingerprint == record["preprocessingFingerprint"]
-    assert list(recipe.encoder.device_support) == record["deviceSupport"]
-    assert recipe.encoder.output_dimension == record["outputShape"]["dimension"]
-    assert recipe.encoder.trust_policy == record["trustPolicy"]
-    assert recipe.encoder.attribution == record["attribution"]
+    for name, value in record.items():
+        if name == "notes":
+            # The notes are the provenance of the record, not a decision of
+            # the run, and they travel with the record.
+            continue
+        assert name in pin, f"the pin drops the field {name}"
+        assert pin[name] == value, f"the pin changes the field {name}"
+    assert set(pin) == set(record) - {"notes"}
 
 
 def test_the_recipe_carries_the_data_the_split_pins() -> None:
@@ -277,6 +276,24 @@ def test_a_record_without_a_field_the_recipe_needs_is_refused(tmp_path: Path) ->
     assert failure.value.code == "RECIPE_ENCODER_FIELD_INVALID"
     assert failure.value.field == "models.0.preprocessingFingerprint"
     assert "does not carry this field" in failure.value.reason
+
+
+def test_a_model_whose_usage_restrictions_are_empty_is_pinned(
+    tmp_path: Path,
+) -> None:
+    """The pin inherits the exemption of the record.
+
+    The record lets the usage restrictions be empty, because a model may
+    forbid nothing, and a rule the recipe holds to a stricter shape than
+    the record refuses a model the platform is allowed to run.
+    """
+    record = tracked_model()
+    record["usageRestrictions"] = ""
+    registry = write_registry(tmp_path, [record])
+
+    recipe = resolve_tracked(registry_path=registry)
+
+    assert recipe.encoder.usage_restrictions == ""
 
 
 def test_a_class_without_a_documented_weight_is_refused() -> None:
