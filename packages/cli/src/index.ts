@@ -696,6 +696,78 @@ benchmark
     }
   });
 
+// The Python route (VLN-006). The route is a NEW surface: a new group of
+// subcommands, and nothing else of the CLI changes. No existing flag is
+// renamed, removed or given a new meaning, and the legacy path never
+// launches a worker.
+//
+// The root program disables Commander's built-in help (the legacy CLI owns
+// its help text) and Commander copies the help settings to every
+// subcommand, so the commands re-enable the help option explicitly.
+const python = program
+  .command('python')
+  .description('Run the operations of the Python worker')
+  .helpOption(true)
+  .action(async (_opts: Record<string, string | boolean>, cmd: Command) => {
+    // `vision-lens python` without a subcommand prints the subcommand help.
+    cmd.outputHelp();
+  });
+
+python
+  .command('embed')
+  .description('Embed the assets of a snapshot with the Python worker')
+  .helpOption(true)
+  .requiredOption('--snapshot <id>', 'The snapshot the run belongs to')
+  .option(
+    '--asset <id=path>',
+    'An asset to embed, repeatable (the id is the id of the asset in the store)',
+    (value: string, previous: string[]) => previous.concat([value]),
+    [] as string[],
+  )
+  .option('--model <name>', 'The encoder to run', 'siglip2-base')
+  .option('--workspace <id>', 'The workspace of the run', 'local')
+  .option('--artifact-root <dir>', 'The root the worker writes its artifacts under')
+  .option('--max-seconds <n>', 'The wall-clock ceiling of the run, in seconds')
+  .option('--route <value>', 'enabled | disabled (defaults to the environment)')
+  .option('--idempotency-key <key>', 'The key that makes the run idempotent')
+  .option('--db <path>', 'The store the artifact row is written to')
+  .option('--output-format <fmt>', 'pretty | json | none', 'pretty')
+  .action(async (opts: Record<string, string | boolean>, cmd: Command) => {
+    try {
+      const flags = (opts['asset'] as unknown as string[] | undefined) ?? [];
+      if (flags.length === 0) {
+        logger.error('[error] --asset is required: a run with no asset embedded nothing');
+        process.exit(2);
+      }
+      const { parseAssetFlags, runPythonEmbed } = await import('./commands/python-embed.js');
+      const root = (cmd.parent?.parent?.opts() ?? {}) as Record<string, string | boolean>;
+      const exitCode = await runPythonEmbed({
+        snapshotId: opts['snapshot'] as string,
+        assets: parseAssetFlags(flags),
+        model: opts['model'] as string,
+        workspaceId: opts['workspace'] as string,
+        ...(opts['artifactRoot'] === undefined
+          ? {}
+          : { artifactRoot: opts['artifactRoot'] as string }),
+        ...(opts['maxSeconds'] === undefined
+          ? {}
+          : { maxSeconds: opts['maxSeconds'] as string }),
+        ...(opts['route'] === undefined ? {} : { route: opts['route'] as string }),
+        ...(opts['idempotencyKey'] === undefined
+          ? {}
+          : { idempotencyKey: opts['idempotencyKey'] as string }),
+        ...(opts['db'] === undefined ? {} : { dbPath: opts['db'] as string }),
+        // The root flag is honoured when the subcommand does not carry one,
+        // so `--output-format json` works on either side of the subcommand.
+        outputFormat: (opts['outputFormat'] as string | undefined) ?? (root['outputFormat'] as string | undefined),
+      });
+      process.exitCode = exitCode;
+    } catch (error) {
+      logger.error(String((error as Error).message));
+      process.exit(1);
+    }
+  });
+
 program.parseAsync(process.argv);
 
 // Exported for the `@vision-lens/sdk/cli` re-export shim (library consumers
