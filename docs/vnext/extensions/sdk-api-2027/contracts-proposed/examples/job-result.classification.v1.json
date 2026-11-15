@@ -1,0 +1,26 @@
+{
+  "data": {
+    "jobId": "job_001",
+    "operation": "vision.predict",
+    "taskKind": "image.classification",
+    "artifacts": [
+      {
+        "artifactId": "art_001",
+        "mediaType": "application/json",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byteLength": 137,
+        "accessTier": "workspace"
+      }
+    ],
+    "provenance": {
+      "inputSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "modelRevision": "classifier@sha256-locked",
+      "preprocessFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "contractVersion": "1.0.0"
+    }
+  },
+  "meta": {
+    "requestId": "req_004",
+    "contractVersion": "1.0.0"
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.visionlens.example/candidate/p3/job-event.v1.schema.json",
+  "title": "VisionLens Phase III candidate job-event.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "jobId",
+    "seq",
+    "kind"
+  ],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-zA-Z0-9._:@-]+$"
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "enum": [
+        "queued",
+        "progress",
+        "result",
+        "error",
+        "cancelled",
+        "heartbeat"
+      ]
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "preparing",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "expired"
+      ]
+    },
+    "completed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "resultRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-zA-Z0-9._:@-]+$"
+    }
+  }
+}

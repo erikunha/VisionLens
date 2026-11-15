@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.visionlens.example/candidate/p3/job-resource.v1.schema.json",
+  "title": "VisionLens Phase III candidate job-resource.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "data",
+    "meta"
+  ],
+  "properties": {
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jobId",
+        "operation",
+        "status",
+        "submittedAt",
+        "lastEventSequence"
+      ],
+      "properties": {
+        "jobId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._:@-]+$"
+        },
+        "operation": {
+          "const": "vision.predict"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "preparing",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "expired"
+          ]
+        },
+        "submittedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastEventSequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resultRef": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "pattern": "^[a-zA-Z0-9._:@-]+$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cancelRequested": {
+          "type": "boolean"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId",
+        "contractVersion"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._:@-]+$"
+        },
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        }
+      }
+    }
+  }
+}

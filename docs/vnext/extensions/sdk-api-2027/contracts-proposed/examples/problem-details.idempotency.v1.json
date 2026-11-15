@@ -1,0 +1,9 @@
+{
+  "type": "urn:visionlens:problem:idempotency-conflict",
+  "title": "Idempotency key conflict",
+  "status": 409,
+  "detail": "Same key was used with a different effective request.",
+  "code": "IDEMPOTENCY_CONFLICT",
+  "requestId": "req_001",
+  "retryable": false
+}

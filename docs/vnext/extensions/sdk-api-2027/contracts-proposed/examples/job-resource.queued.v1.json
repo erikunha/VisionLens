@@ -1,0 +1,14 @@
+{
+  "data": {
+    "jobId": "job_001",
+    "operation": "vision.predict",
+    "status": "queued",
+    "submittedAt": "2026-11-15T12:00:00Z",
+    "lastEventSequence": 0,
+    "cancelRequested": false
+  },
+  "meta": {
+    "requestId": "req_001",
+    "contractVersion": "1.0.0"
+  }
+}

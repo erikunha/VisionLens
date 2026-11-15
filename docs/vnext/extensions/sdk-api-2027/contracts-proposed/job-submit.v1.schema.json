@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.visionlens.example/candidate/p3/job-submit.v1.schema.json",
+  "title": "VisionLens Phase III candidate job-submit.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "operation",
+    "params",
+    "budget"
+  ],
+  "properties": {
+    "operation": {
+      "const": "vision.predict"
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "taskKind",
+        "assetId",
+        "modelId"
+      ],
+      "properties": {
+        "taskKind": {
+          "const": "image.classification"
+        },
+        "assetId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._:@-]+$"
+        },
+        "modelId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._:@-]+$"
+        },
+        "options": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [],
+          "properties": {
+            "topK": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxSeconds",
+        "maxUsdMicro"
+      ],
+      "properties": {
+        "maxSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "maxUsdMicro": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxTokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  },
+  "description": "Alpha reference only: other CV tasks require explicit new accepted operation variants, not arbitrary params."
+}
