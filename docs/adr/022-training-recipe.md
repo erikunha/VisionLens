@@ -86,7 +86,10 @@ of the tree recorded below.
    recipe over the TRACKED registry and the TRACKED split, validates it
    against the TypeScript schema, recomputes the fingerprint and compares
    the two addresses. A fingerprint only one side can recompute proves
-   nothing, so the claim has a command and not a sentence. The gate runs over
+   nothing, so the claim has a command and not a sentence. The gate proves
+   the address of the COMMITTED SOURCE and not of the build: it computes the
+   address with the source of the canonical serialisation as well, so a
+   build that is older than the source is caught instead of certified. The gate runs over
    BOTH regimes of class weight, the default one where every class is weighted
    `none` and the numeric one where every class carries a number: a gate that
    looked at one regime would let the other one rot, and a weight that

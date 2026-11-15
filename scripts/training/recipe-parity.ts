@@ -36,11 +36,13 @@
  * It exits 1 when the two sides disagree.
  */
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { canonicalJson } from '../../packages/contracts/src/fingerprint.js';
 import {
   ontologyVersionOf,
   trainRecipeFingerprint,
@@ -82,6 +84,25 @@ function resolveOnPython(weightsFile?: string): Resolution {
 }
 
 /**
+ * The address of a recipe, computed with the SOURCE of the canonical
+ * serialisation.
+ *
+ * The core reaches the canonical serialisation through the package, so the
+ * function it uses is the one of the BUILD. The gate computes the address
+ * with the SOURCE as well, so a build that is older than the source is
+ * caught here instead of being certified: the gate proves the address of
+ * the committed source, and not of whatever the build directory holds.
+ */
+function fingerprintOfSource(recipe: Readonly<Record<string, unknown>>): string {
+  const components = { ...recipe };
+  delete components['fingerprint'];
+  const digest = createHash('sha256')
+    .update(canonicalJson(components), 'utf8')
+    .digest('hex');
+  return `fp2:${digest.slice(0, 16)}`;
+}
+
+/**
  * Checks the recipe the Python side published against the TypeScript side.
  *
  * The shape and the address are two different promises, and the check
@@ -99,7 +120,16 @@ function checkRecipe(label: string, recipe: Record<string, unknown>): boolean {
   );
 
   const recomputed = trainRecipeFingerprint(recipe);
+  const fromSource = fingerprintOfSource(recipe);
   const declared = String(recipe['fingerprint']);
+  if (recomputed !== fromSource) {
+    console.error(
+      `the build of the contracts and the committed source disagree about the address of ` +
+        `the ${label} configuration: the build computed ${recomputed} and the source ` +
+        `computed ${fromSource}; the gate proves the source, so run pnpm build first`,
+    );
+    return false;
+  }
   if (recomputed !== declared) {
     console.error(
       `the two sides disagree about the address of the ${label} configuration: the ` +
