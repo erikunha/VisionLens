@@ -73,8 +73,10 @@ jobs:
       # interpreter is named explicitly, because uv prefers an interpreter it
       # manages over the one on PATH: without it, both legs of the matrix
       # would build the same environment and the matrix would prove nothing.
+      # The `training` extra is part of the environment because the suites of
+      # the training surface fit the M0 estimator.
       - name: Resolve the locked development environment
-        run: uv sync --group dev --locked --python ${{ matrix.python-version }}
+        run: uv sync --group dev --extra training --locked --python ${{ matrix.python-version }}
         working-directory: python/visionlens
 
       - name: Build the artifacts
@@ -84,17 +86,18 @@ jobs:
       - name: Package tests
         run: |
           uv run --group dev python --version
-          uv run --group dev pytest tests -q
+          uv run --group dev --extra training pytest tests -q
         working-directory: python/visionlens
 
       # The type checker sees the WHOLE package, and the package carries
-      # the encoder of the vision extra, so the extra is installed for
-      # this step: a checker that cannot resolve the import of a module
-      # reports a missing library instead of a type. The check itself is
-      # the same one, with the same configuration and the same bar of
-      # zero errors; only the environment is complete.
+      # the encoder of the vision extra and the estimator of the training
+      # extra, so both extras are installed for this step: a checker that
+      # cannot resolve the import of a module reports a missing library
+      # instead of a type. The check itself is the same one, with the same
+      # configuration and the same bar of zero errors; only the environment
+      # is complete.
       - name: Type checker
-        run: uv run --group dev --extra vision --locked mypy src/visionlens
+        run: uv run --group dev --extra vision --extra training --locked mypy src/visionlens
         working-directory: python/visionlens
 
       # The gate owns the build, the artifact scan, the clean installs with

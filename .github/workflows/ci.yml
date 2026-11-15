@@ -50,14 +50,21 @@ jobs:
         continue-on-error: true
 
       # All Python suites (services smoke, visionlens worker and facade, mock
-      # provider) need pytest, and the visionlens suites need the base
-      # dependency the distribution declares (Pydantic, per the ADR-011
-      # packaging amendment of 2026-11-14). Installing the distribution
-      # itself keeps the runner aligned with the declared metadata instead of
-      # a hand-copied requirement range.
+      # provider) need pytest, and the visionlens suites need the dependency
+      # the distribution declares (Pydantic, per the ADR-011 packaging
+      # amendment of 2026-11-14). Installing the distribution itself keeps the
+      # runner aligned with the declared metadata instead of a hand-copied
+      # requirement range.
+      #
+      # The `training` extra is installed because the suites of the training
+      # surface FIT the M0 estimator, and a suite that cannot import the
+      # estimator it tests is a suite that proves nothing. The base install
+      # stays free of the heavy stack, and that purity is proven where it
+      # matters: the release gate installs the wheel in a clean environment
+      # and refuses a base install that imports the heavy stack.
       # --break-system-packages is required on PEP 668-managed runner images.
-      - name: Set up Python (pytest and the visionlens base dependency)
-        run: python3 -m pip install --user --break-system-packages pytest ./python/visionlens
+      - name: Set up Python (pytest and the visionlens training extra)
+        run: python3 -m pip install --user --break-system-packages pytest './python/visionlens[training]'
 
       - name: Lint
         run: pnpm lint

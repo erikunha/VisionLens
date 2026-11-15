@@ -26,6 +26,12 @@ MANDATORY_REQUIREMENTS = ["pillow<14,>=13", "pydantic<3,>=2.12"]
 # (docs/vnext/05-PYTHON-CORE-AND-PYPI.md:34, :35).
 VISION_EXTRA_DISTRIBUTIONS = {"torch", "transformers", "safetensors"}
 
+# The stack the `training` extra carries: the estimator of the M0 rung
+# (scikit-learn, with numpy under it) and the reader of the frozen feature
+# artifact (joblib). The base install carries none of them either, so the
+# base never pulls a scikit-learn download.
+TRAINING_EXTRA_DISTRIBUTIONS = {"scikit-learn", "numpy", "joblib"}
+
 
 def _distribution_name(requirement: str) -> str:
     """The distribution name of a Requires-Dist line, without its specifier."""
@@ -93,7 +99,45 @@ def test_the_vision_extra_carries_the_heavy_stack(built_dist: Path) -> None:
     aggregate = {
         _distribution_name(r) for r in requires if "extra == 'all'" in r
     }
-    assert aggregate == VISION_EXTRA_DISTRIBUTIONS
+    assert VISION_EXTRA_DISTRIBUTIONS <= aggregate
+
+
+def test_the_training_extra_carries_the_estimator_stack(built_dist: Path) -> None:
+    """The estimator of the M0 rung lives behind its own extra.
+
+    The base install never pulls a scikit-learn download, and the extra
+    that fits the probe is not the extra that reads the encoder.
+    """
+    metadata = _metadata(built_dist)
+    requires = [
+        line.split(":", 1)[1].strip()
+        for line in metadata.splitlines()
+        if line.startswith("Requires-Dist:")
+    ]
+    training = {
+        _distribution_name(r) for r in requires if "extra == 'training'" in r
+    }
+    assert training == TRAINING_EXTRA_DISTRIBUTIONS
+
+
+def test_the_aggregate_carries_every_capability_extra(built_dist: Path) -> None:
+    """`all` is the aggregate of the extras that carry a stack.
+
+    The `agents` and the `server` extras carry no package yet, so the
+    aggregate of the heavy stacks is the aggregate of everything a caller
+    installs with it. An aggregate that left a stack out would be an
+    install that a caller believes is complete and that is not.
+    """
+    metadata = _metadata(built_dist)
+    requires = [
+        line.split(":", 1)[1].strip()
+        for line in metadata.splitlines()
+        if line.startswith("Requires-Dist:")
+    ]
+    aggregate = {
+        _distribution_name(r) for r in requires if "extra == 'all'" in r
+    }
+    assert aggregate == VISION_EXTRA_DISTRIBUTIONS | TRAINING_EXTRA_DISTRIBUTIONS
 
 
 def test_sdist_metadata_matches_the_wheel(built_dist: Path) -> None:
