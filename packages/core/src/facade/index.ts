@@ -48,17 +48,19 @@ export {
 export type { FacadeErrorCode, FacadeExitCode, FacadeOwnErrorCode } from './errors.js';
 
 export {
+  DEFAULT_WORKER_ARGS,
+  DEFAULT_WORKER_SCRIPT,
   fingerprintOfRequest,
   PythonWorkerAdapter,
   WORKER_ARTIFACT_ROOT_ENV,
+  WORKER_ASSET_ROOT_ENV,
+  WORKER_ENV_NAMES,
+  WORKER_MODEL_ROOT_ENV,
+  WORKER_REGISTRY_ENV,
 } from './adapter.js';
 export type { PythonWorkerAdapterOptions } from './adapter.js';
 
-export {
-  paidFallbackRefusal,
-  requireFacadeRoute,
-  resolveFacadeRoute,
-} from './route.js';
+export { requireFacadeRoute, resolveFacadeRoute } from './route.js';
 export type { FacadeRouteDecision, FacadeRouteTarget } from './route.js';
 
 export {
@@ -93,5 +95,6 @@ export type {
   FacadeEmbeddingOutcome,
   FacadeEmbeddingRequest,
   FacadeEmbeddingResult,
+  FacadeErrorSample,
   VisionOperationPort,
 } from './port.js';

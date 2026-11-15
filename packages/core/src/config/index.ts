@@ -217,16 +217,6 @@ export interface Config {
    * Disagreements are flagged with `lowConsensus: true` on the ProcessedResult.
    */
   readonly consensusProviders?: readonly string[];
-  /**
-   * The Python route: the opt-in that sends the `vision.embed` operation to
-   * the Python worker.
-   *
-   * Absent means the route is OFF, and the refusal names the environment
-   * variable that turns it on. There is no autodetection of an installed
-   * worker, because a route that appears by itself is the silent provider
-   * change the ticket forbids.
-   */
-  readonly pythonRoute?: PythonRouteConfig;
 }
 
 /**
@@ -244,6 +234,14 @@ export interface PythonRouteConfig {
   readonly workspaceId: string;
   /** The root the worker writes its artifacts under. */
   readonly artifactRoot: string;
+  /**
+   * The root the worker resolves the paths of the assets against.
+   *
+   * It is the variable the PYTHON side reads, so the facade and the worker
+   * agree on it by construction and the facade can check the assets it asked
+   * for against the ones the worker embedded.
+   */
+  readonly assetRoot: string;
   /** The wall-clock budget of one operation, in seconds. */
   readonly maxSeconds: number;
 }
@@ -259,6 +257,27 @@ export const PYTHON_WORKSPACE_ENV = 'VISION_LENS_PYTHON_WORKSPACE';
 
 /** The environment variable that names the root the artifacts live under. */
 export const PYTHON_ARTIFACT_ROOT_ENV = 'VISION_LENS_PYTHON_ARTIFACT_ROOT';
+
+/**
+ * The environment variable the PYTHON side publishes the artifact root under.
+ *
+ * An operator who follows the documentation of the worker sets this one, so
+ * the route reads it too: a route that names a different root than the
+ * worker writes under is a route that validates the bytes of another
+ * directory.
+ */
+export const PYTHON_WORKER_ARTIFACT_ROOT_ENV = 'VISIONLENS_WORKER_ARTIFACT_ROOT';
+
+/**
+ * The environment variable that names the root the assets live under.
+ *
+ * It is the variable the PYTHON side reads
+ * (`VISIONLENS_WORKER_ASSET_ROOT`), and not a second name for the same
+ * thing: the facade and the worker must resolve the paths of the assets
+ * against the SAME root, or the facade cannot check the assets it asked for
+ * against the ones the worker embedded.
+ */
+export const PYTHON_ASSET_ROOT_ENV = 'VISIONLENS_WORKER_ASSET_ROOT';
 
 /** The environment variable that carries the wall-clock budget of the route. */
 export const PYTHON_MAX_SECONDS_ENV = 'VISION_LENS_PYTHON_MAX_SECONDS';
@@ -338,6 +357,8 @@ export interface RawCliOptions {
   pythonWorkspace?: string;
   /** The root the worker writes its artifacts under. */
   pythonArtifactRoot?: string;
+  /** The root the worker resolves the paths of the assets against. */
+  pythonAssetRoot?: string;
   /** The wall-clock budget of one operation of the Python route, in seconds. */
   pythonMaxSeconds?: string;
 }
@@ -396,6 +417,19 @@ export function resolvePythonRouteConfig(options: RawCliOptions = {}): PythonRou
   ).trim();
   const enabled = rawRoute.toLowerCase() === PYTHON_ROUTE_ENABLED_VALUE;
 
+  // A route that is OFF reads NOTHING else: the configuration of a route
+  // nobody turned on is not the configuration of anything, and reading it
+  // would make the presence of a variable enough to change a run.
+  if (!enabled) {
+    return {
+      enabled: false,
+      workspaceId: DEFAULT_PYTHON_WORKSPACE,
+      artifactRoot: '',
+      assetRoot: '',
+      maxSeconds: DEFAULT_PYTHON_MAX_SECONDS,
+    };
+  }
+
   const workspaceId =
     (options.pythonWorkspace ?? process.env[PYTHON_WORKSPACE_ENV] ?? '').trim() ||
     DEFAULT_PYTHON_WORKSPACE;
@@ -403,14 +437,21 @@ export function resolvePythonRouteConfig(options: RawCliOptions = {}): PythonRou
   const artifactRoot = (
     options.pythonArtifactRoot ??
     process.env[PYTHON_ARTIFACT_ROOT_ENV] ??
+    process.env[PYTHON_WORKER_ARTIFACT_ROOT_ENV] ??
     ''
   ).trim();
 
-  const maxSeconds = enabled
-    ? resolvePythonMaxSeconds(options.pythonMaxSeconds ?? process.env[PYTHON_MAX_SECONDS_ENV])
-    : DEFAULT_PYTHON_MAX_SECONDS;
+  const assetRoot = (
+    options.pythonAssetRoot ??
+    process.env[PYTHON_ASSET_ROOT_ENV] ??
+    ''
+  ).trim();
 
-  return { enabled, workspaceId, artifactRoot, maxSeconds };
+  const maxSeconds = resolvePythonMaxSeconds(
+    options.pythonMaxSeconds ?? process.env[PYTHON_MAX_SECONDS_ENV],
+  );
+
+  return { enabled, workspaceId, artifactRoot, assetRoot, maxSeconds };
 }
 
 /**
@@ -426,7 +467,7 @@ function resolvePythonMaxSeconds(raw: string | undefined): number {
   const parsed = Number(raw.trim());
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new Error(
-      `[error] --python-max-seconds must be a whole number of seconds of at least 1 (got: ${raw})`,
+      `[error] --max-seconds must be a whole number of seconds of at least 1 (got: ${raw})`,
     );
   }
   return parsed;
@@ -572,11 +613,6 @@ export async function loadConfig(cliOptions: RawCliOptions): Promise<Config> {
 
   const defaultModel = DEFAULT_MODEL[provider] ?? 'gpt-4o';
 
-  // The Python route is resolved ONLY when the operator turned it on: a
-  // route that is off must not read a single environment variable more
-  // than the legacy path read before the route existed.
-  const pythonRoute = resolvePythonRouteConfig(cliOptions);
-
   return {
     inputDir: cliOptions.inputDir ?? cliOptions.input ?? process.env['INPUT_DIR'] ?? './input',
     outputDir: cliOptions.outputDir ?? cliOptions.output ?? process.env['OUTPUT_DIR'] ?? './output',
@@ -636,10 +672,6 @@ export async function loadConfig(cliOptions: RawCliOptions): Promise<Config> {
     embed: cliOptions.embed ?? false,
     sessionGapMinutes: cliOptions.sessionGapMinutes,
     consensusProviders: cliOptions.consensusProviders,
-    // The route is resolved ONLY when the operator turned it on, so the
-    // legacy path reads exactly as many environment variables as it read
-    // before the route existed.
-    pythonRoute: pythonRoute?.enabled ? pythonRoute : undefined,
   };
 }
 

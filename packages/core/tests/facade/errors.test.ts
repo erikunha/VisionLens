@@ -22,7 +22,10 @@ describe('the errors of the facade', () => {
 
   it('carries the flag the facade decided for its own codes', () => {
     expect(new FacadeError('ROUTE_DISABLED', 'the route is off').retryable).toBe(false);
-    expect(new FacadeError('WORKER_UNAVAILABLE', 'no worker').retryable).toBe(true);
+    expect(new FacadeError('WORKER_UNAVAILABLE', 'no worker').retryable).toBe(false);
+    expect(new FacadeError('HANDSHAKE_FAILED', 'no hello').retryable).toBe(true);
+    expect(new FacadeError('REQUEST_INVALID', 'bad request').retryable).toBe(false);
+    expect(new FacadeError('RUN_IN_PROGRESS', 'still running').retryable).toBe(true);
     expect(new FacadeError('ARTIFACT_INVALID', 'bad artifact').retryable).toBe(false);
     expect(new FacadeError('STORE_WRITE_FAILED', 'the store refused').retryable).toBe(true);
   });
@@ -31,7 +34,6 @@ describe('the errors of the facade', () => {
     expect(exitCodeOf('ROUTE_DISABLED')).toBe(FACADE_EXIT_CODES.unavailable);
     expect(exitCodeOf('OPERATION_UNSUPPORTED')).toBe(FACADE_EXIT_CODES.validation);
     expect(exitCodeOf('UNSUPPORTED_PROTOCOL')).toBe(FACADE_EXIT_CODES.policy);
-    expect(exitCodeOf('NO_PAID_FALLBACK')).toBe(FACADE_EXIT_CODES.policy);
     expect(exitCodeOf('WORKER_CRASHED')).toBe(FACADE_EXIT_CODES.runtime);
     expect(exitCodeOf('PROVIDER_UNAVAILABLE')).toBe(FACADE_EXIT_CODES.unavailable);
   });

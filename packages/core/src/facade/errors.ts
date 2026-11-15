@@ -22,11 +22,12 @@ import { WORKER_ERROR_RETRYABLE, type WorkerErrorCode } from '@vision-lens/contr
 export type FacadeOwnErrorCode =
   | 'ROUTE_DISABLED'
   | 'OPERATION_UNSUPPORTED'
+  | 'REQUEST_INVALID'
+  | 'RUN_IN_PROGRESS'
   | 'WORKER_UNAVAILABLE'
   | 'HANDSHAKE_FAILED'
   | 'ARTIFACT_INVALID'
-  | 'STORE_WRITE_FAILED'
-  | 'NO_PAID_FALLBACK';
+  | 'STORE_WRITE_FAILED';
 
 /** Every code the facade can answer with. */
 export type FacadeErrorCode = FacadeOwnErrorCode | WorkerErrorCode;
@@ -43,16 +44,30 @@ export const FACADE_EXIT_CODES = {
 /** One of the exit codes of the facade. */
 export type FacadeExitCode = (typeof FACADE_EXIT_CODES)[keyof typeof FACADE_EXIT_CODES];
 
-/** The retryable flag and the exit code of every code the facade owns. */
+/**
+ * The retryable flag and the exit code of every code the facade owns.
+ *
+ * The flag says whether a caller MAY try again, and it is never a guess:
+ *
+ *  - a route that is off is a configuration decision, and no retry changes
+ *    it;
+ *  - a worker that could not be STARTED is a missing or a broken install,
+ *    and a retry of the same command fails the same way;
+ *  - a worker that never answered its hello is a transient condition, and
+ *    the caller may try again;
+ *  - a request the facade refuses on its own terms is a deterministic
+ *    invalid input, and no retry changes it.
+ */
 const OWN_CODES: Readonly<Record<FacadeOwnErrorCode, { retryable: boolean; exitCode: FacadeExitCode }>> =
   {
     ROUTE_DISABLED: { retryable: false, exitCode: FACADE_EXIT_CODES.unavailable },
     OPERATION_UNSUPPORTED: { retryable: false, exitCode: FACADE_EXIT_CODES.validation },
-    WORKER_UNAVAILABLE: { retryable: true, exitCode: FACADE_EXIT_CODES.unavailable },
+    REQUEST_INVALID: { retryable: false, exitCode: FACADE_EXIT_CODES.validation },
+    RUN_IN_PROGRESS: { retryable: true, exitCode: FACADE_EXIT_CODES.runtime },
+    WORKER_UNAVAILABLE: { retryable: false, exitCode: FACADE_EXIT_CODES.unavailable },
     HANDSHAKE_FAILED: { retryable: true, exitCode: FACADE_EXIT_CODES.unavailable },
     ARTIFACT_INVALID: { retryable: false, exitCode: FACADE_EXIT_CODES.runtime },
     STORE_WRITE_FAILED: { retryable: true, exitCode: FACADE_EXIT_CODES.runtime },
-    NO_PAID_FALLBACK: { retryable: false, exitCode: FACADE_EXIT_CODES.policy },
   };
 
 /** The exit code of every code the WORKER reported. */
@@ -100,7 +115,7 @@ export class FacadeError extends Error {
       (Object.hasOwn(WORKER_ERROR_RETRYABLE, code)
         ? WORKER_ERROR_RETRYABLE[code as WorkerErrorCode]
         : false);
-    this.exitCode = own?.exitCode ?? WORKER_EXIT_CODES[code as WorkerErrorCode] ?? FACADE_EXIT_CODES.runtime;
+    this.exitCode = exitCodeOf(code);
   }
 }
 
@@ -118,9 +133,16 @@ export function isFacadeOwnCode(code: string): code is FacadeOwnErrorCode {
 /**
  * The exit code of a code, whether the facade owns it or the worker
  * reported it.
+ *
+ * Both lookups use `hasOwn`: a plain lookup finds the members of the
+ * prototype chain too, so a code named `toString` would inherit the
+ * function of the chain instead of an exit code.
  */
 export function exitCodeOf(code: FacadeErrorCode): FacadeExitCode {
   const own = OWN_CODES[code as FacadeOwnErrorCode];
   if (own !== undefined) return own.exitCode;
-  return WORKER_EXIT_CODES[code as WorkerErrorCode] ?? FACADE_EXIT_CODES.runtime;
+  if (Object.hasOwn(WORKER_EXIT_CODES, code)) {
+    return WORKER_EXIT_CODES[code as WorkerErrorCode];
+  }
+  return FACADE_EXIT_CODES.runtime;
 }

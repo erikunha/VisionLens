@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PYTHON_ROUTE_ENV, type PythonRouteConfig } from '../../src/config/index.js';
-import {
-  paidFallbackRefusal,
-  requireFacadeRoute,
-  resolveFacadeRoute,
-} from '../../src/facade/route.js';
+import { requireFacadeRoute, resolveFacadeRoute } from '../../src/facade/route.js';
 import { FacadeError } from '../../src/facade/errors.js';
 
 /**
@@ -16,6 +12,7 @@ const ENABLED: PythonRouteConfig = {
   enabled: true,
   workspaceId: 'local',
   artifactRoot: '/srv/visionlens/artifacts',
+  assetRoot: '/srv/visionlens/assets',
   maxSeconds: 300,
 };
 
@@ -59,20 +56,19 @@ describe('the route of the facade', () => {
     expect((thrown as FacadeError).message).toContain(PYTHON_ROUTE_ENV);
   });
 
+  it('refuses an operation the facade does not route with the code of the registry', () => {
+    let thrown: unknown;
+    try {
+      requireFacadeRoute('vision.predict', ENABLED);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(FacadeError);
+    expect((thrown as FacadeError).code).toBe('OPERATION_UNSUPPORTED');
+    expect((thrown as FacadeError).exitCode).toBe(2);
+  });
+
   it('returns the decision when the route is enabled', () => {
     expect(requireFacadeRoute('vision.embed', ENABLED).target).toBe('python');
-  });
-
-  it('reports that no paid fallback was used', () => {
-    const refusal = paidFallbackRefusal('the worker died', false);
-    expect(refusal.code).toBe('NO_PAID_FALLBACK');
-    expect(refusal.exitCode).toBe(4);
-    expect(refusal.message).toContain('no paid fallback is enabled');
-  });
-
-  it('reports the refusal even when a fallback was enabled explicitly', () => {
-    const refusal = paidFallbackRefusal('the worker died', true);
-    expect(refusal.code).toBe('NO_PAID_FALLBACK');
-    expect(refusal.message).toContain('was not used');
   });
 });

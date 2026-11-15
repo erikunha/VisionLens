@@ -88,6 +88,18 @@ const ALLOWED_TRANSITIONS: Readonly<Record<FacadeRunState, readonly FacadeRunSta
 };
 
 /**
+ * The bounded alphabet of an idempotency key.
+ *
+ * The key reaches a log line and the ledger of the facade, so it is bounded
+ * in length and in alphabet: a key with a newline in it would forge a log
+ * line, and a key with a megabyte in it would be a megabyte in the log.
+ */
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/** The bounded alphabet of the id of a run. */
+const RUN_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
+
+/**
  * One run of the facade.
  *
  * The record is the only thing that knows how the run ended, and it is
@@ -108,17 +120,23 @@ export class FacadeRun {
   private attemptCount = 0;
 
   constructor(input: FacadeRunInput) {
-    if (typeof input.id !== 'string' || input.id.length === 0) {
-      throw new FacadeError('ARTIFACT_INVALID', 'a run needs an id');
+    if (typeof input.id !== 'string' || !RUN_ID_PATTERN.test(input.id)) {
+      throw new FacadeError('REQUEST_INVALID', 'a run needs a bounded id');
     }
-    if (typeof input.idempotencyKey !== 'string' || input.idempotencyKey.length === 0) {
-      throw new FacadeError('ARTIFACT_INVALID', 'a run needs an idempotency key');
+    if (
+      typeof input.idempotencyKey !== 'string' ||
+      !IDEMPOTENCY_KEY_PATTERN.test(input.idempotencyKey)
+    ) {
+      throw new FacadeError(
+        'REQUEST_INVALID',
+        'a run needs a bounded idempotency key of letters, digits, dots, dashes, colons and underscores',
+      );
     }
     if (typeof input.inputFingerprint !== 'string' || input.inputFingerprint.length === 0) {
-      throw new FacadeError('ARTIFACT_INVALID', 'a run needs the fingerprint of its input');
+      throw new FacadeError('REQUEST_INVALID', 'a run needs the fingerprint of its input');
     }
     if (!Number.isInteger(input.budget?.maxSeconds) || input.budget.maxSeconds < 1) {
-      throw new FacadeError('ARTIFACT_INVALID', 'a run needs a budget of at least one second');
+      throw new FacadeError('REQUEST_INVALID', 'a run needs a budget of at least one second');
     }
     this.id = input.id;
     this.operation = input.operation;
@@ -143,9 +161,14 @@ export class FacadeRun {
     return this.attemptCount;
   }
 
-  /** Every transition of the run, in order. */
+  /**
+   * Every transition of the run, in order.
+   *
+   * The list is a COPY: the history of a run is append only, and a caller
+   * that could push onto it could forge a transition the run never made.
+   */
   get transitions(): readonly FacadeRunTransition[] {
-    return this.recorded;
+    return [...this.recorded];
   }
 
   /** The failure of the run, when it failed. */
@@ -257,9 +280,29 @@ export class FacadeRun {
 export class FacadeRunLedger {
   private readonly runs = new Map<string, FacadeRun>();
 
-  /** Records a run under its key. */
-  register(run: FacadeRun): void {
-    this.runs.set(run.idempotencyKey, run);
+  /**
+   * Records a run under its key, in the scope it belongs to.
+   *
+   * The scope is the workspace: the registry names the key as scoped to the
+   * workspace, and two workspaces that share a key are two different runs.
+   *
+   * A key that is already registered is a REFUSAL: the ledger never
+   * replaces a run silently, because a replaced run is a run nobody can
+   * explain afterwards.
+   *
+   * @throws FacadeError with the code `OPERATION_UNSUPPORTED` when the key
+   *     is already used for another input.
+   */
+  register(scope: string, run: FacadeRun): void {
+    const key = ledgerKey(scope, run.idempotencyKey);
+    const existing = this.runs.get(key);
+    if (existing && existing.inputFingerprint !== run.inputFingerprint) {
+      throw new FacadeError(
+        'OPERATION_UNSUPPORTED',
+        `the idempotency key "${run.idempotencyKey}" was already used for another input, and a key that names two requests names none`,
+      );
+    }
+    this.runs.set(key, run);
   }
 
   /**
@@ -270,8 +313,12 @@ export class FacadeRunLedger {
    *     uses for a request nobody can serve, because a key that names two
    *     requests is a request nobody can serve.
    */
-  find(idempotencyKey: string, inputFingerprint: string): FacadeRun | undefined {
-    const run = this.runs.get(idempotencyKey);
+  find(
+    scope: string,
+    idempotencyKey: string,
+    inputFingerprint: string,
+  ): FacadeRun | undefined {
+    const run = this.runs.get(ledgerKey(scope, idempotencyKey));
     if (!run) return undefined;
     if (run.inputFingerprint !== inputFingerprint) {
       throw new FacadeError(
@@ -286,4 +333,9 @@ export class FacadeRunLedger {
   get size(): number {
     return this.runs.size;
   }
+}
+
+/** The key of a run in the ledger: the scope and the key, never mixed. */
+function ledgerKey(scope: string, idempotencyKey: string): string {
+  return `${scope}\u0000${idempotencyKey}`;
 }

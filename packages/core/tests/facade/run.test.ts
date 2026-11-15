@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FacadeRun, FacadeRunLedger } from '../../src/facade/run.js';
+import { FacadeRun, FacadeRunLedger, type FacadeRunTransition } from '../../src/facade/run.js';
 import { FacadeError } from '../../src/facade/errors.js';
 
 /**
@@ -34,6 +34,17 @@ describe('the run of the facade', () => {
     expect(record.attempt).toBe(1);
   });
 
+  it('hands the history out as a copy, so a transition cannot be forged', () => {
+    const record = run();
+    record.start();
+    const history = record.transitions as FacadeRunTransition[];
+    history.push({ from: 'running', to: 'succeeded', reason: 'forged' });
+    expect(record.transitions.map((transition) => transition.to)).toEqual([
+      'queued',
+      'running',
+    ]);
+  });
+
   it('refuses a run without an id, without a key or without a fingerprint', () => {
     expect(() => run({ id: '' })).toThrowError(FacadeError);
     expect(() => run({ idempotencyKey: '' })).toThrowError(FacadeError);
@@ -42,6 +53,12 @@ describe('the run of the facade', () => {
 
   it('refuses a run without a budget of at least one second', () => {
     expect(() => run({ budget: { maxSeconds: 0 } })).toThrowError(FacadeError);
+  });
+
+  it('refuses an idempotency key that is not a bounded name', () => {
+    expect(() => run({ idempotencyKey: 'key\nwith a newline' })).toThrowError(FacadeError);
+    expect(() => run({ idempotencyKey: 'a'.repeat(129) })).toThrowError(FacadeError);
+    expect(() => run({ idempotencyKey: 'key with spaces' })).toThrowError(FacadeError);
   });
 
   it('keeps a terminal state immutable', () => {
@@ -92,28 +109,35 @@ describe('the ledger of the runs of the facade', () => {
   it('returns the first run for a key used with the same input', () => {
     const ledger = new FacadeRunLedger();
     const first = run();
-    ledger.register(first);
-    const found = ledger.find('key-0001', 'fp2:0123456789abcdef');
+    ledger.register('local', first);
+    const found = ledger.find('local', 'key-0001', 'fp2:0123456789abcdef');
     expect(found).toBe(first);
     expect(ledger.size).toBe(1);
   });
 
   it('finds nothing for a key that was never used', () => {
     const ledger = new FacadeRunLedger();
-    expect(ledger.find('key-9999', 'fp2:0123456789abcdef')).toBeUndefined();
+    expect(ledger.find('local', 'key-9999', 'fp2:0123456789abcdef')).toBeUndefined();
   });
 
   it('refuses a key that was used for another input', () => {
     const ledger = new FacadeRunLedger();
-    ledger.register(run());
+    ledger.register('local', run());
     let thrown: unknown;
     try {
-      ledger.find('key-0001', 'fp2:fedcba9876543210');
+      ledger.find('local', 'key-0001', 'fp2:fedcba9876543210');
     } catch (error) {
       thrown = error;
     }
     expect(thrown).toBeInstanceOf(FacadeError);
     expect((thrown as FacadeError).code).toBe('OPERATION_UNSUPPORTED');
     expect((thrown as FacadeError).message).toContain('key-0001');
+  });
+
+  it('keeps the runs of two workspaces apart', () => {
+    const ledger = new FacadeRunLedger();
+    ledger.register('local', run());
+    expect(ledger.find('other', 'key-0001', 'fp2:0123456789abcdef')).toBeUndefined();
+    expect(ledger.find('local', 'key-0001', 'fp2:0123456789abcdef')).toBeDefined();
   });
 });

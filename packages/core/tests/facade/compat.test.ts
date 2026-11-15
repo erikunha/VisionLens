@@ -104,10 +104,10 @@ describe('the compatibility of the facade with the shipped surface', () => {
 
   it('refuses a budget that is not a whole number of seconds', () => {
     expect(() => resolvePythonRouteConfig({ pythonRoute: 'enabled', pythonMaxSeconds: '0' })).toThrow(
-      /python-max-seconds/,
+      /--max-seconds/,
     );
     expect(() =>
       resolvePythonRouteConfig({ pythonRoute: 'enabled', pythonMaxSeconds: '1.5' }),
-    ).toThrow(/python-max-seconds/);
+    ).toThrow(/--max-seconds/);
   });
 });

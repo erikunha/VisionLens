@@ -35,7 +35,7 @@
  * the store only when it is asked for.
  */
 import type { FacadeArtifactCommit, FacadeEmbeddingOutcome } from '@vision-lens/core/facade';
-import { PythonWorkerAdapter } from '@vision-lens/core/facade';
+import { FacadeError, PythonWorkerAdapter } from '@vision-lens/core/facade';
 import { resolvePythonRouteConfig } from '@vision-lens/core/config';
 import { logger } from '@vision-lens/core/utils/logger';
 
@@ -59,6 +59,8 @@ export interface PythonEmbedCommandOptions {
   readonly workspaceId?: string;
   /** The root the worker writes its artifacts under. */
   readonly artifactRoot?: string;
+  /** The root the worker resolves the paths of the assets against. */
+  readonly assetRoot?: string;
   /** The wall-clock ceiling of the run, in seconds. */
   readonly maxSeconds?: string;
   /** The route, `enabled` or `disabled`. */
@@ -133,6 +135,7 @@ export async function runPythonEmbed(options: PythonEmbedCommandOptions): Promis
     ...(options.artifactRoot === undefined
       ? {}
       : { pythonArtifactRoot: options.artifactRoot }),
+    ...(options.assetRoot === undefined ? {} : { pythonAssetRoot: options.assetRoot }),
     ...(options.maxSeconds === undefined ? {} : { pythonMaxSeconds: options.maxSeconds }),
   });
 
@@ -192,15 +195,27 @@ async function storeSink(dbPath: string): Promise<{
   return {
     sink: {
       async commit(commit: FacadeArtifactCommit): Promise<void> {
-        artifacts.insert({
-          id: newEntityId(),
-          kind: commit.kind,
-          sourceAssetIds: [...commit.sourceAssetIds],
-          sourceSnapshotId: commit.sourceSnapshotId,
-          transform: commit.transform,
-          transformFingerprint: commit.transformFingerprint,
-          createdAt: new Date().toISOString(),
-        });
+        try {
+          artifacts.insert({
+            id: newEntityId(),
+            kind: commit.kind,
+            sourceAssetIds: [...commit.sourceAssetIds],
+            sourceSnapshotId: commit.sourceSnapshotId,
+            transform: commit.transform,
+            transformFingerprint: commit.transformFingerprint,
+            createdAt: new Date().toISOString(),
+          });
+        } catch (error) {
+          // A row the store REFUSES because the lineage does not exist is a
+          // validation refusal and not a runtime failure: the caller has to
+          // fix the ids, and no retry changes them.
+          if ((error as { name?: string }).name === 'StoreValidationError') {
+            throw new FacadeError('REQUEST_INVALID', String((error as Error).message), {
+              cause: error,
+            });
+          }
+          throw error;
+        }
       },
     },
     close: () => store.close(),

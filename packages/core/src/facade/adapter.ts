@@ -8,11 +8,13 @@ import {
   WorkerLaunchError,
   WorkerOperationContractError,
   WorkerProtocolError,
+  WORKER_INTERPRETER_ENV,
   type RecordedVisionEmbedSuccess,
   type WorkerClientOptions,
 } from '../worker/index.js';
 import type { PythonRouteConfig } from '../config/index.js';
 import {
+  digestOfAsset,
   transformFingerprintOf,
   transformNameOf,
   validateEmbeddingArtifact,
@@ -62,6 +64,40 @@ import type {
 /** The environment variable the Python side reads the artifact root from. */
 export const WORKER_ARTIFACT_ROOT_ENV = 'VISIONLENS_WORKER_ARTIFACT_ROOT';
 
+/** The environment variable the Python side reads the asset root from. */
+export const WORKER_ASSET_ROOT_ENV = 'VISIONLENS_WORKER_ASSET_ROOT';
+
+/** The environment variable the Python side reads the model registry from. */
+export const WORKER_REGISTRY_ENV = 'VISIONLENS_WORKER_REGISTRY';
+
+/** The environment variable the Python side reads the model cache from. */
+export const WORKER_MODEL_ROOT_ENV = 'VISIONLENS_WORKER_MODEL_ROOT';
+
+/**
+ * The default launch of the worker.
+ *
+ * The worker is a MODULE of the Python package, so the default is
+ * `python3 -m visionlens.worker`: the interpreter comes from the fixed
+ * allowlist and the module travels as argv, never through a shell. The
+ * package has to be importable by that interpreter, which is what the
+ * virtual environment of the package is for.
+ */
+export const DEFAULT_WORKER_SCRIPT = '-m';
+export const DEFAULT_WORKER_ARGS: readonly string[] = ['visionlens.worker'];
+
+/**
+ * The environment of the worker that the facade hands over by name.
+ *
+ * The child process does NOT inherit the environment of the host: the host
+ * may carry the keys of a paid provider, and the worker is a different
+ * program with a different job. The facade therefore names the variables
+ * the worker needs, and the host passes exactly those.
+ */
+export const WORKER_ENV_NAMES: readonly string[] = [
+  WORKER_REGISTRY_ENV,
+  WORKER_MODEL_ROOT_ENV,
+];
+
 /** The options of the adapter. */
 export interface PythonWorkerAdapterOptions {
   /** The route configuration. Without it the route is off. */
@@ -102,6 +138,18 @@ export class PythonWorkerAdapter implements VisionOperationPort {
    * success from a failure by accident.
    */
   async runEmbedding(request: FacadeEmbeddingRequest): Promise<FacadeEmbeddingOutcome> {
+    try {
+      return await this.execute(request);
+    } catch (error) {
+      // The port answers a typed outcome and never throws: a caller that
+      // trusts the contract must not receive an exception where a refusal
+      // belongs.
+      return this.refusal(error);
+    }
+  }
+
+  /** The body of the run, with every refusal answered as an outcome. */
+  private async execute(request: FacadeEmbeddingRequest): Promise<FacadeEmbeddingOutcome> {
     let route: ReturnType<typeof requireFacadeRoute>;
     try {
       route = requireFacadeRoute('vision.embed', this.options.route);
@@ -110,10 +158,12 @@ export class PythonWorkerAdapter implements VisionOperationPort {
     }
     void route;
 
+    this.requireRouteConfiguration();
+
     const fingerprint = fingerprintOfRequest(request);
     let previous: FacadeRun | undefined;
     try {
-      previous = this.ledger.find(request.idempotencyKey, fingerprint);
+      previous = this.ledger.find(request.workspaceId, request.idempotencyKey, fingerprint);
     } catch (error) {
       return this.refusal(error);
     }
@@ -128,7 +178,7 @@ export class PythonWorkerAdapter implements VisionOperationPort {
       inputFingerprint: fingerprint,
       budget: { maxSeconds: request.budget.maxSeconds },
     });
-    this.ledger.register(run);
+    this.ledger.register(request.workspaceId, run);
     run.start();
 
     let client: WorkerClient;
@@ -150,6 +200,8 @@ export class PythonWorkerAdapter implements VisionOperationPort {
         return { ok: false, error: success.error, run };
       }
 
+      this.requireKnownErrorSamples(success.result.errorSamples, request);
+
       const validated = await validateEmbeddingArtifact({
         artifactRoot: this.options.route?.artifactRoot ?? '',
         embeddingRunId: success.result.embeddingRunId,
@@ -157,6 +209,7 @@ export class PythonWorkerAdapter implements VisionOperationPort {
         count: success.result.count,
         dimensions: success.result.dimensions,
         dtype: success.result.dtype,
+        ...(await this.expectedAssetDigests(request, success.result.errorSamples)),
       });
 
       const transformFingerprint = transformFingerprintOf(
@@ -171,15 +224,21 @@ export class PythonWorkerAdapter implements VisionOperationPort {
         dimensions: success.result.dimensions,
         dtype: success.result.dtype,
         artifact: validated.reference,
+        errorSamples: success.result.errorSamples.map((sample) => ({ ...sample })),
         transformFingerprint,
         contractVersion: this.options.contractVersion ?? CONTRACTS_VERSION,
         protocolVersion: client.hello.protocolVersion,
       };
 
       if (this.options.sink) {
+        const refused = new Set(success.result.errorSamples.map((sample) => sample.assetId));
         const commit: FacadeArtifactCommit = {
           kind: 'embedding',
-          sourceAssetIds: request.assets.map((asset) => asset.assetId),
+          // The lineage names the assets the artifact was derived from: the
+          // images the run REFUSED are not the sources of the vectors.
+          sourceAssetIds: request.assets
+            .map((asset) => asset.assetId)
+            .filter((assetId) => !refused.has(assetId)),
           sourceSnapshotId: request.snapshotId,
           transform: transformNameOf(validated.transform),
           transformFingerprint,
@@ -212,6 +271,61 @@ export class PythonWorkerAdapter implements VisionOperationPort {
   }
 
   /**
+   * Requires that the error samples name the assets the run was asked for.
+   *
+   * A worker that reports a failure for an asset nobody asked for is
+   * reporting something the caller cannot check, and a run whose successes
+   * and failures do not add up to the request is not the request.
+   */
+  private requireKnownErrorSamples(
+    samples: readonly { readonly assetId: string }[],
+    request: FacadeEmbeddingRequest,
+  ): void {
+    const requested = new Set(request.assets.map((asset) => asset.assetId));
+    for (const sample of samples) {
+      if (!requested.has(sample.assetId)) {
+        throw new FacadeError(
+          'ARTIFACT_INVALID',
+          `the run reported a failure for the asset "${sample.assetId}", which the request never asked for`,
+        );
+      }
+    }
+    if (samples.length > request.assets.length) {
+      throw new FacadeError(
+        'ARTIFACT_INVALID',
+        `the run reported ${samples.length} failures while the request asked for ${request.assets.length} assets`,
+      );
+    }
+  }
+
+  /**
+   * The digests of the assets the run was supposed to embed.
+   *
+   * The digests are computed from the bytes of the assets, resolved against
+   * the approved root the worker resolves them against, so the facade and the
+   * worker read the same files. The assets the worker refused are left out:
+   * the manifest names only the ones it embedded.
+   *
+   * When the asset root is not configured the check is SKIPPED: the facade
+   * cannot know the root the worker used, and a check it cannot perform is
+   * not a check.
+   */
+  private async expectedAssetDigests(
+    request: FacadeEmbeddingRequest,
+    samples: readonly { readonly assetId: string }[],
+  ): Promise<{ expectedAssetDigests?: readonly string[] }> {
+    const assetRoot = this.options.route?.assetRoot ?? '';
+    if (assetRoot.length === 0) return {};
+    const refused = new Set(samples.map((sample) => sample.assetId));
+    const digests: string[] = [];
+    for (const asset of request.assets) {
+      if (refused.has(asset.assetId)) continue;
+      digests.push(await digestOfAsset(assetRoot, asset.path));
+    }
+    return { expectedAssetDigests: digests };
+  }
+
+  /**
    * Launches the worker.
    *
    * The artifact root travels to the worker in its environment, so the root
@@ -220,17 +334,28 @@ export class PythonWorkerAdapter implements VisionOperationPort {
    */
   private async launch(): Promise<WorkerClient> {
     const artifactRoot = this.options.route?.artifactRoot ?? '';
+    const assetRoot = this.options.route?.assetRoot ?? '';
     const env: NodeJS.ProcessEnv = { ...this.options.env };
     if (artifactRoot.length > 0) {
       env[WORKER_ARTIFACT_ROOT_ENV] = artifactRoot;
+    }
+    if (assetRoot.length > 0) {
+      env[WORKER_ASSET_ROOT_ENV] = assetRoot;
+    }
+    // The registry and the cache of the models are the operator's
+    // configuration of the worker, and the facade hands them over by name
+    // instead of letting the whole environment of the host travel down.
+    for (const name of WORKER_ENV_NAMES) {
+      const value = process.env[name];
+      if (value !== undefined && env[name] === undefined) env[name] = value;
     }
     const options: WorkerClientOptions = {
       env,
       ...(this.options.interpreter !== undefined
         ? { interpreter: this.options.interpreter }
         : {}),
-      ...(this.options.scriptPath !== undefined ? { scriptPath: this.options.scriptPath } : {}),
-      ...(this.options.scriptArgs !== undefined ? { scriptArgs: this.options.scriptArgs } : {}),
+      scriptPath: this.options.scriptPath ?? DEFAULT_WORKER_SCRIPT,
+      scriptArgs: this.options.scriptArgs ?? [...DEFAULT_WORKER_ARGS],
       ...(this.options.contractVersion !== undefined
         ? { contractVersion: this.options.contractVersion }
         : {}),
@@ -281,10 +406,13 @@ export class PythonWorkerAdapter implements VisionOperationPort {
       return { ok: true, result: parsed };
     } catch (error) {
       if (error instanceof WorkerOperationContractError) {
+        // A payload that is not the shape the operation promises is a
+        // MALFORMED_FRAME, the code the frozen vocabulary owns: it is not an
+        // artifact problem, the artifact was never written.
         return {
           ok: false,
           error: new FacadeError(
-            'ARTIFACT_INVALID',
+            'MALFORMED_FRAME',
             `the result of the run does not have the shape the operation promises: ${error.message}`,
             { cause: error },
           ),
@@ -295,21 +423,65 @@ export class PythonWorkerAdapter implements VisionOperationPort {
   }
 
   /**
+   * Requires the configuration of the route to be complete.
+   *
+   * The check happens BEFORE the worker is launched: a route without an
+   * artifact root cannot validate the artifact it produced, and a run that
+   * ends in a refusal after the work was done cost the operator the whole
+   * run and left the bytes outside the approved root.
+   */
+  private requireRouteConfiguration(): void {
+    const artifactRoot = this.options.route?.artifactRoot ?? '';
+    if (artifactRoot.length === 0) {
+      throw new FacadeError(
+        'REQUEST_INVALID',
+        'the python route has no artifact root, so the artifact of a run could not be validated; set VISION_LENS_PYTHON_ARTIFACT_ROOT',
+      );
+    }
+  }
+
+  /**
    * Maps a failure of the LAUNCH to a typed error.
    *
-   * A worker that could not be started, or that never answered its hello,
-   * is UNAVAILABLE: nothing the worker said was wrong, the channel itself
-   * failed. A hello that broke the wire contract keeps its own code, because
-   * that is a fact about the worker and not about the machine.
+   * The kind of the failure decides the code, and the kind is computed by
+   * the worker module and never guessed here:
+   *
+   *  - a worker that could not be STARTED is a missing or a broken install:
+   *    the same command fails the same way, so it is not retryable;
+   *  - a worker that never answered its hello is a transient condition, and
+   *    the caller may try again;
+   *  - a worker that died is a crash, and the operation is idempotent, so
+   *    the caller may try again.
+   *
+   * The message names the interpreter and the KIND of the failure, and
+   * never the path of the script: a local path of the machine is not a fact
+   * the caller of the facade needs, and it is not a fact a log should carry.
    */
   private launchFailureOf(error: unknown): FacadeError {
     if (error instanceof FacadeError) return error;
     if (error instanceof WorkerProtocolError) {
       return new FacadeError(error.code, error.message, { cause: error });
     }
+    const interpreter =
+      this.options.interpreter ?? process.env[WORKER_INTERPRETER_ENV] ?? 'python3';
+    const kind = error instanceof WorkerLaunchError ? error.kind : 'spawn-error';
+    if (kind === 'worker-died') {
+      return new FacadeError(
+        'WORKER_CRASHED',
+        `the worker died before it could answer (${kind})`,
+        { cause: error },
+      );
+    }
+    if (kind === 'handshake-timeout') {
+      return new FacadeError(
+        'HANDSHAKE_FAILED',
+        `the worker did not answer its hello in time (${kind}); the interpreter was "${interpreter}"`,
+        { cause: error },
+      );
+    }
     return new FacadeError(
       'WORKER_UNAVAILABLE',
-      `the worker process could not be started: ${messageOf(error)}`,
+      `the worker process could not be started: the interpreter "${interpreter}" did not run the worker (${kind})`,
       { cause: error },
     );
   }
@@ -318,15 +490,15 @@ export class PythonWorkerAdapter implements VisionOperationPort {
   private failureOf(error: unknown): FacadeError {
     if (error instanceof FacadeError) return error;
     if (error instanceof WorkerProtocolError) {
-      return new FacadeError(error.code, error.message, { cause: error });
+      return new FacadeError(error.code, safeMessage(error.message), { cause: error });
     }
     if (error instanceof WorkerDeadlineError) {
-      return new FacadeError('DEADLINE_EXCEEDED', error.message, { cause: error });
+      return new FacadeError('DEADLINE_EXCEEDED', safeMessage(error.message), { cause: error });
     }
     if (error instanceof WorkerLaunchError) {
-      return new FacadeError('WORKER_UNAVAILABLE', error.message, { cause: error });
+      return new FacadeError('WORKER_UNAVAILABLE', safeMessage(error.message), { cause: error });
     }
-    return new FacadeError('WORKER_CRASHED', messageOf(error), { cause: error });
+    return new FacadeError('WORKER_CRASHED', safeMessage(messageOf(error)), { cause: error });
   }
 
   /** Answers a refusal that happened before the run existed. */
@@ -344,9 +516,10 @@ export class PythonWorkerAdapter implements VisionOperationPort {
  * same key and the same fingerprint are the same run.
  */
 export function fingerprintOfRequest(request: FacadeEmbeddingRequest): string {
-  const assets = request.assets
-    .map((asset) => ({ assetId: asset.assetId, path: asset.path }))
-    .sort((left, right) => (left.assetId < right.assetId ? -1 : 1));
+  // The assets are fingerprinted in the ORDER of the request: the worker
+  // pairs every vector with its asset by position, so two requests with the
+  // same images in a different order are two different runs.
+  const assets = request.assets.map((asset) => ({ assetId: asset.assetId, path: asset.path }));
   return fingerprintV2({
     model: request.model,
     promptTemplate: 'embedding',
@@ -363,15 +536,46 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * The outcome of a run that already ended.
+ * A message that is safe to carry in a log.
+ *
+ * The text of the other side of the boundary reaches the logs of the caller,
+ * so it is bounded and the control characters are dropped: a worker that
+ * sends a newline or an escape sequence must not be able to forge a log
+ * line.
+ */
+function safeMessage(text: string): string {
+  let stripped = '';
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    stripped += code < 0x20 || code === 0x7f ? ' ' : character;
+  }
+  return stripped.length > 500 ? `${stripped.slice(0, 500)}...` : stripped;
+}
+
+/**
+ * The outcome of a run that already exists under the same key.
  *
  * A repeated key returns the FIRST outcome, whether it was a success or a
  * failure: the work is done once, and a key that names two different
  * requests is a refusal rather than a second run.
+ *
+ * A run that has NOT reached a terminal state is a run IN FLIGHT, and the
+ * caller is told so: a run in flight is not a crash, and the message of a
+ * crash would state something false about the world.
  */
 function outcomeOf(run: FacadeRun): FacadeEmbeddingOutcome {
   if (run.state === 'succeeded') {
     return { ok: true, result: run.result as FacadeEmbeddingResult, run };
+  }
+  if (!run.isTerminal) {
+    return {
+      ok: false,
+      error: new FacadeError(
+        'RUN_IN_PROGRESS',
+        `the run ${run.id} is still ${run.state}, and the work is done once`,
+      ),
+      run,
+    };
   }
   const failure = run.failure;
   return {

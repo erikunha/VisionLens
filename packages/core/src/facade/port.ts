@@ -35,6 +35,16 @@ export interface FacadeEmbeddingRequest {
   readonly idempotencyKey: string;
 }
 
+/** One image the run could not embed, and why. */
+export interface FacadeErrorSample {
+  /** The asset the sample belongs to. */
+  readonly assetId: string;
+  /** Why the image was refused. */
+  readonly code: string;
+  /** The human-readable form of the refusal. */
+  readonly message: string;
+}
+
 /** The success of an embedding run. */
 export interface FacadeEmbeddingResult {
   /** The operation the result is about. */
@@ -49,6 +59,15 @@ export interface FacadeEmbeddingResult {
   readonly dtype: string;
   /** The artifact, relative and content addressed. */
   readonly artifact: FacadeArtifactReference;
+  /**
+   * The images the run could not embed.
+   *
+   * A run that refused some of its images is a PARTIAL run: the artifact
+   * covers the images that succeeded, and the refusals are named here so
+   * that nobody reads the count of the artifact as the count of the
+   * request.
+   */
+  readonly errorSamples: readonly FacadeErrorSample[];
   /** The fingerprint of the transform that produced the artifact. */
   readonly transformFingerprint: string;
   /** The contract version the request was built against. */

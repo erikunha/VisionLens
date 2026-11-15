@@ -715,7 +715,9 @@ const python = program
 
 python
   .command('embed')
-  .description('Embed the assets of a snapshot with the Python worker')
+  .description(
+    'Embed the assets of a snapshot with the Python worker (the registry of the models and the cache of the weights come from VISIONLENS_WORKER_REGISTRY and VISIONLENS_WORKER_MODEL_ROOT)',
+  )
   .helpOption(true)
   .requiredOption('--snapshot <id>', 'The snapshot the run belongs to')
   .option(
@@ -727,6 +729,7 @@ python
   .option('--model <name>', 'The encoder to run', 'siglip2-base')
   .option('--workspace <id>', 'The workspace of the run', 'local')
   .option('--artifact-root <dir>', 'The root the worker writes its artifacts under')
+  .option('--asset-root <dir>', 'The root the worker resolves the asset paths against')
   .option('--max-seconds <n>', 'The wall-clock ceiling of the run, in seconds')
   .option('--route <value>', 'enabled | disabled (defaults to the environment)')
   .option('--idempotency-key <key>', 'The key that makes the run idempotent')
@@ -749,6 +752,9 @@ python
         ...(opts['artifactRoot'] === undefined
           ? {}
           : { artifactRoot: opts['artifactRoot'] as string }),
+        ...(opts['assetRoot'] === undefined
+          ? {}
+          : { assetRoot: opts['assetRoot'] as string }),
         ...(opts['maxSeconds'] === undefined
           ? {}
           : { maxSeconds: opts['maxSeconds'] as string }),
@@ -763,8 +769,11 @@ python
       });
       process.exitCode = exitCode;
     } catch (error) {
+      // A refusal of the new route is a VALIDATION refusal and not the
+      // generic failure of the legacy commands: the exit map of the route
+      // is the one of the facade.
       logger.error(String((error as Error).message));
-      process.exit(1);
+      process.exit(2);
     }
   });
 

@@ -7,7 +7,12 @@ import type {
   FacadeArtifactCommit,
   FacadeEmbeddingRequest,
 } from '../../src/facade/port.js';
-import type { WorkerClient } from '../../src/worker/index.js';
+import {
+  WorkerDeadlineError,
+  WorkerLaunchError,
+  WorkerProtocolError,
+  type WorkerClient,
+} from '../../src/worker/index.js';
 
 /**
  * The adapter of the facade, against a fake worker.
@@ -24,14 +29,15 @@ const FIXTURE_ROOT = join(
 );
 
 const FIXTURE_DIGEST =
-  '771aadcbc610c566165d9b247627af460b05c3f6263fb5fc3c862b54f66dd117';
+  '4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a';
 
-const FIXTURE_RUN_ID = 'run-fixture-0001';
+const FIXTURE_RUN_ID = 'embed-23961656d069411baecac8e1d638b47f';
 
 const ROUTE = {
   enabled: true,
   workspaceId: 'local',
   artifactRoot: FIXTURE_ROOT,
+  assetRoot: '',
   maxSeconds: 300,
 };
 
@@ -61,8 +67,8 @@ function hello(supportedOperations: string[] = ['vision.embed']): WorkerHelloFra
 function recordedResult(): Record<string, unknown> {
   return {
     embeddingRunId: FIXTURE_RUN_ID,
-    count: 2,
-    dimensions: 3,
+    count: 6,
+    dimensions: 768,
     dtype: 'float32',
     artifactSha256: FIXTURE_DIGEST,
     errorSamples: [],
@@ -133,11 +139,11 @@ describe('the adapter of the facade', () => {
     if (!outcome.ok) throw new Error('the run should have succeeded');
     expect(outcome.result.operation).toBe('vision.embed');
     expect(outcome.result.embeddingRunId).toBe(FIXTURE_RUN_ID);
-    expect(outcome.result.count).toBe(2);
-    expect(outcome.result.dimensions).toBe(3);
+    expect(outcome.result.count).toBe(6);
+    expect(outcome.result.dimensions).toBe(768);
     expect(outcome.result.dtype).toBe('float32');
     expect(outcome.result.artifact.relativePath).toBe(
-      'artifacts/embedding/run-fixture-0001',
+      `artifacts/embedding/${FIXTURE_RUN_ID}`,
     );
     expect(outcome.result.artifact.sha256).toBe(FIXTURE_DIGEST);
     expect(outcome.result.transformFingerprint).toMatch(/^fp2:[0-9a-f]{16}$/);
@@ -225,7 +231,9 @@ describe('the adapter of the facade', () => {
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error('the run should not have succeeded');
     expect(outcome.error.code).toBe('WORKER_UNAVAILABLE');
-    expect(outcome.error.retryable).toBe(true);
+    // A worker that could not be STARTED is a broken install: the same
+    // command fails the same way, so the refusal is not retryable.
+    expect(outcome.error.retryable).toBe(false);
     expect(outcome.error.exitCode).toBe(3);
   });
 
@@ -261,7 +269,10 @@ describe('the adapter of the facade', () => {
     const outcome = await adapter.runEmbedding(REQUEST);
     expect(outcome.ok).toBe(false);
     if (outcome.ok) throw new Error('the run should not have succeeded');
-    expect(outcome.error.code).toBe('ARTIFACT_INVALID');
+    // A payload that breaks the contract of the operation is a
+    // MALFORMED_FRAME: the artifact was never written, so it is not an
+    // artifact problem.
+    expect(outcome.error.code).toBe('MALFORMED_FRAME');
   });
 
   it('answers STORE_WRITE_FAILED when the row was not committed', async () => {
@@ -300,5 +311,202 @@ describe('the adapter of the facade', () => {
       snapshotId: 'snapshot-fixture-0001',
       model: 'siglip2-base',
     });
+  });
+
+  it('hands the artifact root to the worker, so the two roots are the same root', async () => {
+    let seen: NodeJS.ProcessEnv | undefined;
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      interpreter: 'python3',
+      scriptPath: 'worker.py',
+      contractVersion: '1.0.0',
+      clientFactory: async (options) => {
+        seen = options.env;
+        return fakeClient().client;
+      },
+    });
+
+    await adapter.runEmbedding(REQUEST);
+    expect(seen?.['VISIONLENS_WORKER_ARTIFACT_ROOT']).toBe(FIXTURE_ROOT);
+  });
+
+  it('keeps the code of a refusal the worker reported', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => {
+        const fake = fakeClient();
+        const client = {
+          hello: fake.client.hello,
+          async request() {
+            throw new WorkerProtocolError(
+              'MISSING_EXTRA',
+              'the python build lacks the vision extra',
+            );
+          },
+          async close() {
+            return undefined;
+          },
+        };
+        return client as unknown as WorkerClient;
+      },
+    });
+
+    const outcome = await adapter.runEmbedding(REQUEST);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('MISSING_EXTRA');
+    expect(outcome.error.exitCode).toBe(4);
+  });
+
+  it('answers DEADLINE_EXCEEDED when the budget elapsed', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => {
+        const fake = fakeClient();
+        const client = {
+          hello: fake.client.hello,
+          async request() {
+            throw new WorkerDeadlineError('request-0001', 300);
+          },
+          async close() {
+            return undefined;
+          },
+        };
+        return client as unknown as WorkerClient;
+      },
+    });
+
+    const outcome = await adapter.runEmbedding(REQUEST);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('DEADLINE_EXCEEDED');
+    expect(outcome.error.retryable).toBe(false);
+  });
+
+  it('answers HANDSHAKE_FAILED when the worker never answered its hello', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => {
+        throw new WorkerLaunchError('handshake-timeout', 'the worker did not answer');
+      },
+    });
+
+    const outcome = await adapter.runEmbedding(REQUEST);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('HANDSHAKE_FAILED');
+    expect(outcome.error.retryable).toBe(true);
+    expect(outcome.error.exitCode).toBe(3);
+  });
+
+  it('answers WORKER_CRASHED when the worker died', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => {
+        throw new WorkerLaunchError('worker-died', 'the worker died');
+      },
+    });
+
+    const outcome = await adapter.runEmbedding(REQUEST);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('WORKER_CRASHED');
+    expect(outcome.error.retryable).toBe(true);
+  });
+
+  it('refuses a request that names no asset', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => fakeClient().client,
+    });
+
+    const outcome = await adapter.runEmbedding({ ...REQUEST, assets: [] });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('MALFORMED_FRAME');
+  });
+
+  it('refuses a route without an artifact root, and starts no process', async () => {
+    let launched = 0;
+    const adapter = new PythonWorkerAdapter({
+      route: { ...ROUTE, artifactRoot: '' },
+      clientFactory: async () => {
+        launched += 1;
+        return fakeClient().client;
+      },
+    });
+
+    const outcome = await adapter.runEmbedding(REQUEST);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('REQUEST_INVALID');
+    expect(outcome.error.exitCode).toBe(2);
+    expect(launched).toBe(0);
+  });
+
+  it('answers a typed refusal instead of throwing when the request is invalid', async () => {
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => fakeClient().client,
+    });
+
+    const outcome = await adapter.runEmbedding({
+      ...REQUEST,
+      budget: { maxSeconds: 0, maxUsdMicro: 0 },
+    });
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the run should not have succeeded');
+    expect(outcome.error.code).toBe('REQUEST_INVALID');
+  });
+
+  it('answers RUN_IN_PROGRESS when the same key is already in flight', async () => {
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async () => {
+        const fake = fakeClient();
+        const client = {
+          hello: fake.client.hello,
+          async request(input: { params: Record<string, unknown> }) {
+            await gate;
+            return fake.client.request(input);
+          },
+          async close() {
+            return undefined;
+          },
+        };
+        return client as unknown as WorkerClient;
+      },
+    });
+
+    const first = adapter.runEmbedding(REQUEST);
+    // The second call lands while the first is still in flight.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = await adapter.runEmbedding(REQUEST);
+    release?.();
+
+    const firstOutcome = await first;
+    expect(second.ok).toBe(false);
+    if (second.ok) throw new Error('the second run should not have succeeded');
+    expect(second.error.code).toBe('RUN_IN_PROGRESS');
+    expect(firstOutcome.ok).toBe(true);
+  });
+
+  it('launches the worker as a module of the Python package by default', async () => {
+    let seen: { scriptPath?: string; scriptArgs?: readonly string[] } | null = null;
+    const adapter = new PythonWorkerAdapter({
+      route: ROUTE,
+      clientFactory: async (options) => {
+        seen = { scriptPath: options.scriptPath, scriptArgs: options.scriptArgs };
+        return fakeClient().client;
+      },
+    });
+
+    await adapter.runEmbedding(REQUEST);
+    expect(seen?.scriptPath).toBe('-m');
+    expect(seen?.scriptArgs).toEqual(['visionlens.worker']);
   });
 });

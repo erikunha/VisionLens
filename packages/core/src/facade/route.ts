@@ -19,6 +19,9 @@ import { isFacadeOperation } from './registry.js';
  *  - `python`: the operation goes to the Python worker;
  *  - `disabled`: the operation does not run, and the refusal says why.
  *
+ * There is no third target and no fallback: the facade never calls a
+ * provider, and a route that failed stops there.
+ *
  * There is no `typescript` target. The ML calculation is not replicated in
  * TypeScript (`docs/vnext/specs/VLN-006-ts-python-facade.md:14`), so a
  * TypeScript target for `vision.embed` would be a promise the facade cannot
@@ -78,38 +81,29 @@ export function resolveFacadeRoute(
 /**
  * The route of an operation, or a refusal.
  *
- * @throws FacadeError with the code `ROUTE_DISABLED` when the route is
- *     disabled. The message names the configuration key that turns it on,
- *     because a refusal that cannot be acted on wastes the reader's time.
+ * The two refusals are DIFFERENT facts and they carry different codes:
+ *
+ *  - an operation the facade does not route is `OPERATION_UNSUPPORTED`,
+ *    because no configuration turns it on;
+ *  - a route that is off is `ROUTE_DISABLED`, because a configuration key
+ *    turns it on.
+ *
+ * @throws FacadeError with the code `OPERATION_UNSUPPORTED` when the
+ *     operation is not one the facade routes, and with the code
+ *     `ROUTE_DISABLED` when the route is off. The message names the
+ *     configuration key that turns it on, because a refusal that cannot be
+ *     acted on wastes the reader's time.
  */
 export function requireFacadeRoute(
   operation: string,
   route: PythonRouteConfig | undefined,
 ): FacadeRouteDecision {
+  if (!isFacadeOperation(operation)) {
+    throw new FacadeError('OPERATION_UNSUPPORTED', resolveFacadeRoute(operation, route).reason);
+  }
   const decision = resolveFacadeRoute(operation, route);
   if (decision.target === 'disabled') {
     throw new FacadeError('ROUTE_DISABLED', decision.reason);
   }
   return decision;
-}
-
-/**
- * The refusal of a failed route when no paid fallback was enabled.
- *
- * The facade never falls back to a cloud provider on its own: a fallback
- * that nobody asked for is a bill nobody agreed to. The refusal is REPORTED
- * even when a fallback is enabled, because the fallback is a fact the
- * operator has to see.
- */
-export function paidFallbackRefusal(reason: string, fallbackEnabled: boolean): FacadeError {
-  if (fallbackEnabled) {
-    return new FacadeError(
-      'NO_PAID_FALLBACK',
-      `${reason}; a paid fallback was enabled explicitly and was not used by the facade`,
-    );
-  }
-  return new FacadeError(
-    'NO_PAID_FALLBACK',
-    `${reason}; no paid fallback is enabled, so the run stopped here`,
-  );
 }
