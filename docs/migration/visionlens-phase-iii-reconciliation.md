@@ -207,6 +207,38 @@ Two controls that the extension assumes and the tree does not have:
   decision of the publishing identity (`.github/workflows/release.yml:64-76`) and the Python
   workflow publishes nothing at all (`.github/workflows/python-package.yml:6-9`).
 
+### The seventeen divergences of the candidates
+
+The candidates are not a sketch of the wire of the tree: they are a SECOND wire, and the pack
+itself says that the wire contract is one (`docs/vnext/extensions/sdk-api-2027/README.md:16`).
+The four divergences that decide the shape:
+
+| What | The candidate | The tree |
+|---|---|---|
+| the fingerprint of the preprocessing | `^[a-f0-9]{64}$`, a bare sha256 (`contracts-proposed/job-result.v1.schema.json:97-99`, and the example carries 64 c's) | `^fp2:[0-9a-f]{16}$`, the digest of the recipe (`packages/contracts/src/base.ts:74-79`) |
+| the identity of the request | `jobId` | `requestId` (`packages/contracts/src/worker/protocol.ts:60-71`) |
+| the kind of the event | `queued`, `cancelled`, `heartbeat` | `hello`, `request`, `progress`, `result`, `error`, `cancel` (`packages/contracts/src/worker/index.ts:4-5`) |
+| the vocabulary of the error | `UNSUPPORTED_TASK_KIND`, `VERSION_MISMATCH` and nineteen HTTP codes (`CONTRACTS-AND-CONFORMANCE.md:57-166`) | `UNSUPPORTED_OPERATION`, `PROTOCOL_MISMATCH` and ten frozen codes (`packages/contracts/src/worker/protocol.ts:84-95`) |
+
+And the two names that exist nowhere in the tree: `accessTier` and `taskKind`. The first is a
+field of the candidate of the artifact, and the second is the field that the whole extension of
+the capability packs needs and that the implemented contracts do not have.
+
+### The controls the extension assumes
+
+The threat model of the extension names the controls that a managed HTTP surface needs. The tree
+has none of them yet, and that is not a criticism of the tree: it is a list of what the gate 3
+of the extension has to build.
+
+| Control of the extension | What the tree has |
+|---|---|
+| the auth, with a token, a session and a scope | no middleware of auth anywhere in `packages/` or in `apps/` |
+| the ACL of the artifact, with the workspace of the owner | no workspace column in the 14 tables of the store, and the worker request already REQUIRES a `workspaceId` (`packages/contracts/src/worker/request.ts:40`) |
+| the retention of the asset | no column of retention or of TTL in `packages/core/src/store/migrations/0001_init.sql:99-116` |
+| the PII and the PHI, with the consent and the pseudonymization | the redaction of the log of the worker (`packages/core/src/worker/framing.ts:151-167`) and nothing else |
+| the gate of the consent and of the policy | `packages/core/src/reviewer/index.ts` is an interactive picker of a category for a human, not a gate of policy |
+| the idempotency, the quota, the audit log and the signed URLs | none of them exists |
+
 ## 8. What the extension does not change
 
 The extension is explicit that it does not supersede ADR-011 to ADR-018, that it does not change
