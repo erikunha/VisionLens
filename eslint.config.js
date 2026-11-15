@@ -44,6 +44,17 @@ const WORKER_BOUNDARY_MESSAGE =
 const FACADE_BOUNDARY_MESSAGE =
   'packages/core/src/facade/ may import the Node stdlib, @vision-lens/contracts, packages/core/src/config/ (the types of the route), packages/core/src/worker/, packages/core/src/utils/ and the contract of the manifest (packages/core/src/adapter/embedding-manifest.js) only: no LLM SDK, no Sharp, no direct store access, no analyzer, no processor and no other module of the adapter (see the module boundary table in AGENTS.md).';
 
+/**
+ * Boundary message for `packages/core/src/training/` (the boundary-table row
+ * in AGENTS.md): the training surface validates what the Python side
+ * published and commits the domain rows through a sink. It may import the
+ * Node stdlib, the contracts and utils/. It may NOT import a provider SDK,
+ * Sharp, the store itself, the analyzer or the processor: the training
+ * surface is a validator, not a pipeline and not a database handle.
+ */
+const TRAINING_BOUNDARY_MESSAGE =
+  'packages/core/src/training/ may import the Node stdlib, @vision-lens/contracts and packages/core/src/utils/ only: no LLM SDK, no Sharp, no direct store access, no analyzer, no processor (see the module boundary table in AGENTS.md).';
+
 export default [
   js.configs.recommended,
   {
@@ -205,6 +216,51 @@ export default [
                 '../adapter/parity.js',
               ],
               message: FACADE_BOUNDARY_MESSAGE,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Training boundary rule (the packages/core/src/training/ row of the
+  // boundary table in AGENTS.md): the training surface validates what the
+  // Python side published and commits the domain rows through a sink. It may
+  // import the Node stdlib, the contracts and the utils. It may NOT import
+  // a provider SDK, Sharp, the store itself, the analyzer or the processor:
+  // the training surface is a validator, not a pipeline and not a database
+  // handle. The same rule as the facade, because the same reason.
+  {
+    files: ['packages/core/src/training/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...LLM_SDKS.map((name) => ({ name, message: TRAINING_BOUNDARY_MESSAGE })),
+            { name: 'sharp', message: TRAINING_BOUNDARY_MESSAGE },
+          ],
+          patterns: [
+            ...LLM_SDKS.map((name) => ({ group: [`${name}/*`], message: TRAINING_BOUNDARY_MESSAGE })),
+            { group: ['sharp', 'sharp/*'], message: TRAINING_BOUNDARY_MESSAGE },
+            {
+              group: ['../store', '../store.js', '../store/*', '../store/**'],
+              message: TRAINING_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../index.js', '../index'],
+              message: TRAINING_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['@vision-lens/core', '@vision-lens/core/*'],
+              message: TRAINING_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../analyzer', '../analyzer.js', '../analyzer/*', '../analyzer/**'],
+              message: TRAINING_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../processor', '../processor.js', '../processor/*', '../processor/**'],
+              message: TRAINING_BOUNDARY_MESSAGE,
             },
           ],
         },
