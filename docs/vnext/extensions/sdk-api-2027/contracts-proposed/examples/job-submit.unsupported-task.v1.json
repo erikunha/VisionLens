@@ -1,0 +1,12 @@
+{
+  "operation": "vision.predict",
+  "params": {
+    "taskKind": "video.counting",
+    "assetId": "asset_001",
+    "modelId": "model_001"
+  },
+  "budget": {
+    "maxSeconds": 120,
+    "maxUsdMicro": 0
+  }
+}

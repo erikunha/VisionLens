@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.visionlens.example/candidate/p3/artifact-ref.v1.schema.json",
+  "title": "VisionLens Phase III candidate artifact-ref.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifactId",
+    "mediaType",
+    "sha256",
+    "byteLength",
+    "accessTier"
+  ],
+  "properties": {
+    "artifactId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[a-zA-Z0-9._:@-]+$"
+    },
+    "mediaType": {
+      "type": "string",
+      "minLength": 3
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "byteLength": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "accessTier": {
+      "enum": [
+        "workspace",
+        "restricted",
+        "public-demo"
+      ]
+    }
+  }
+}

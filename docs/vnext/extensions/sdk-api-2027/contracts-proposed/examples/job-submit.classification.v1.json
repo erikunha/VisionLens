@@ -1,0 +1,16 @@
+{
+  "operation": "vision.predict",
+  "params": {
+    "taskKind": "image.classification",
+    "assetId": "asset_001",
+    "modelId": "classifier@sha256-locked",
+    "options": {
+      "topK": 3
+    }
+  },
+  "budget": {
+    "maxSeconds": 120,
+    "maxUsdMicro": 0,
+    "maxTokens": 0
+  }
+}

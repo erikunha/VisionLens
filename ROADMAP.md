@@ -316,6 +316,69 @@ and that this repository still has to build:
 
 ---
 
+## Phase map (Phase III extension: the dual SDKs and the backend API)
+
+The extension `docs/vnext/extensions/sdk-api-2027/` arrives on 2026-11-15 as a proposal, with 58
+tracked files, 40 tickets, 7 candidate schemas and 9 candidate fixtures. Its own manifest covers
+57 of the files and the validator of the pack reports zero errors over the 40 tickets, the 7
+schemas and the 9 fixtures.
+
+**The extension is a PROPOSAL, and it says so in its own first line.** It does not assert that an
+SDK, an endpoint, a package or a number exists. The candidates of `contracts-proposed/` are
+examples, and they never become a source of truth over `packages/contracts` or over the OpenAPI
+snapshot.
+
+### Three products and six execution paths
+
+| Path | What it is | What it never does |
+|---|---|---|
+| Python local standalone | import `visionlens`, run the inference, write a manifest and a CAS under a local directory | no HTTP, no Node, no implicit remote egress |
+| Python remote sync | `VisionLensClient` submits `POST /v1/jobs`, waits by polling or by SSE, downloads the output | no Torch in the client, no raw server path |
+| Python remote asyncio | `AsyncVisionLensClient` with `httpx`, cancellable and bounded | the cancel of a local wait does not cancel the server job |
+| TypeScript HTTP | `@vision-lens/sdk/client` with an injected `fetch`, browser and Node | a browser never sees the filesystem and never sees a tensor |
+| TypeScript Node local | the root and the legacy exports preserved, plus an opt-in bridge to the managed Python worker | the import is explicit and never crosses into the browser bundle |
+| Raw backend API, CLI and MCP | the Fastify `/v1` enforces the auth, the licences and the budgets | the CLI and the MCP are clients of the same services, never a fork of the policy |
+
+### The gates, the epics and the tickets
+
+| Gate | Epic | Tickets | What the gate decides |
+|---|---|---|---|
+| 0 | G0 Reconciliation | VLSDK-001 to 004 | the inventory of the tree, the baseline of the npm exports and of the contracts, and the approval of the five boundary ADRs |
+| 1 | G1 Python local | VLSDK-005 to 010 | the isolated package, the local facade, the model registry with the CPU planner, the immutable artifact sink, the typed errors and the wheel |
+| 2 | G2 Contract spine | VLSDK-011 to 015 | the job shapes, the error taxonomy, the OpenAPI generated from the accepted routes, the golden fixtures and the skew gate |
+| 3 | G3 Backend | VLSDK-016 to 025 | the Fastify app, the capabilities, the CAS ingest, the durable job, the lease queue, the worker handshake, the SSE, the cancel, the artifacts and the first end to end vertical |
+| 4 | G4 Clients and conformance | VLSDK-026 to 032 | the Python sync and async clients, the browser safe TS client, the SSE parser, the cross transport parity and the preserved npm root |
+| 5 | G5 Node local, browser, release, docs, security, ops | VLSDK-033 to 038 | the opt-in Node bridge, the cross runtime smoke, the PyPI and npm dry runs, the guides, the threat model tests and the operational gates |
+| 6 | G6 CV packs | VLSDK-039 and 040 | the classification lab 09 with its evaluation suite, and the retrieval lab 14 over the encoder |
+
+Thirty-four of the forty tickets are P0, five are P1 and one is P2: the only P2 is the opt-in Node
+local bridge, and it is late on purpose. The order is a dependency order and not a wish list:
+the contract spine of the gate 2 exists so that the backend of the gate 3 and the clients of the
+gate 4 are built against the same wire and never against a guess.
+
+### The measures the extension adds
+
+| Dimension | The goal the extension names | How this repository reads it |
+|---|---|---|
+| Installation | the base wheel carries no Torch, no Transformers and no Node | a clean venv is the proof |
+| TS portability | the `/client` smoke runs in the browser and in Node with no `node:*` import | the bundle graph is the gate |
+| Cross client parity | full schema conformance over the golden fixtures | an exact contract, with the tolerances documented |
+| API correctness | the 202, the idempotency, the replay of the SSE, the cancel and the crash tests pass | correctness over the speed of a demo |
+| CV quality | one baseline per task, with the split locked and the provenance recorded | no invented universal accuracy |
+| DX | four runnable guides | a published package only after the smoke |
+| Supply chain | a reproducible lock and build, a SBOM, an audit of the model licences | no accidental redistribution |
+| Operational | the depth of the queue, the failure rate, the p95 by operation and by hardware, the storage of the artifacts | observed values, never a marketing claim |
+
+### The five ADRs the extension proposes
+
+`ADR-P3-001` the public interfaces and the separation of the local state, `ADR-P3-002` the HTTP
+error and the operation envelopes, `ADR-P3-003` the packaging and the versioning of the SDK,
+`ADR-P3-004` the ingest and the retention of the assets, `ADR-P3-005` the durability of the jobs.
+The five are PROPOSALS: none of them overrides ADR-011 to ADR-018, and none of them is accepted
+by the integration of the pack.
+
+---
+
 ## What we are not building (current)
 
 | Item | Reason |
@@ -330,6 +393,12 @@ and that this repository still has to build:
 | Automatic inspection or enforcement automation | The PPE lab produces visible evidence for a human review; it is never a safety control |
 | Automatic deletion of duplicated assets | The visual similarity lab detects near duplicates; it never deletes |
 | A second contract language or a competing schema | The Zod schemas of `packages/contracts` own the public entities; a proposed capability pack is a proposal until an ADR says otherwise |
+| A public diagnostic API | The Phase III extension forbids it too, and lab 16 stays research only |
+| A second public backend | Fastify stays the only public backend; FastAPI without a scoped requirement and an ADR is an anti-pattern of the extension |
+| Python writing into the canonical SQLite | The store has one writer, the TypeScript service; Python standalone keeps its own local manifest and CAS |
+| Torch in a plain install | The base wheel carries no Torch and no Transformers; the heavy stack arrives with the extra that needs it |
+| The proposed OpenAPI over the snapshot | The OpenAPI is generated from the routes the server really accepts, and the proposal is a candidate |
+| Publishing to a registry without an explicit approval | The release is a protected workflow, and the dry runs of the extension are dry |
 
 ## Metrics that matter (Vision Lens additions)
 

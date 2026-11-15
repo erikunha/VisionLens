@@ -1,0 +1,41 @@
+id,epic,priority,relative_size,depends_on,target_scope,deliverable,acceptance_criterion
+VLSDK-001,G0 Reconciliation,P0,S,-,docs/visionlens-adoption/,Inventory current repository HEAD and WIP,Exact paths versions changes and KEEP/AMEND/DEFER/CONFLICT decisions documented
+VLSDK-002,G0 Reconciliation,P0,S,001,packages/sdk/,Baseline current npm public exports and cli aliases,Previous public signatures and bins have contract snapshots
+VLSDK-003,G0 Reconciliation,P0,S,001,packages/contracts/,Baseline Zod and OpenAPI schema/worker compatibility,Generated contracts versus current schemas compared and delta recorded
+VLSDK-004,G0 Reconciliation,P0,M,001;002;003,docs/adrs/,Approve Phase III boundary ADRs,Five ADR decisions accepted amended or explicitly deferred with tests
+VLSDK-005,G1 Python local,P0,M,004,python/visionlens/,Create isolated Python package skeleton,Import without Torch Node or network; py.typed present
+VLSDK-006,G1 Python local,P0,M,005,python/visionlens/src/visionlens/api.py,Add local VisionLens facade with bounded input and model refs,CPU fixture produces typed deterministic output and no hidden remote calls
+VLSDK-007,G1 Python local,P0,M,006,python/visionlens/src/visionlens/runtime/,Model registry and CPU device planner,Exact model digest and preprocessing revision verified; unsupported fails explicitly
+VLSDK-008,G1 Python local,P0,M,006,python/visionlens/src/visionlens/io/,Create local immutable artifact+manifest sink,SHA 256 verified; source unchanged; no TS SQLite writes
+VLSDK-009,G1 Python local,P0,S,006;007,python/visionlens/src/visionlens/errors.py,Typed exceptions and missing extra handling,Base import succeeds without extras; missing extras report actionable code
+VLSDK-010,G1 Python local,P0,M,005;006;008,python/visionlens/pyproject.toml,Build wheel and sdist plus clean consumer smoke,Pure base install and CPU-extra fixture on clean venv 3.11/3.12
+VLSDK-011,G2 Contract spine,P0,M,003;004,packages/contracts/src/,Propose accepted job submit and status shapes,Existing shapes reconciled; runtime Zod parsers and tests updated
+VLSDK-012,G2 Contract spine,P0,M,011,packages/contracts/src/,Define errors and job lifecycle response semantics,RFC9457 or accepted equivalent typed errors and status tests
+VLSDK-013,G2 Contract spine,P0,M,011;012,packages/contracts/,Generate OpenAPI from live schema and route wiring,Deterministic snapshot diff; no handwritten replacement
+VLSDK-014,G2 Contract spine,P0,M,011;012,contracts/golden/,Golden conformance TS Python fixtures,Both clients parse valid and reject invalid samples incl unknown types
+VLSDK-015,G2 Contract spine,P0,S,013;014,tests/contracts/,API worker contract version skew gate,Old client/new server and unsupported major behavior are explicit
+VLSDK-016,G3 Backend,P0,M,004;011,apps/api/src/,Fastify factory injection and auth shell,Fastify.inject auth tests and loopback session protections pass
+VLSDK-017,G3 Backend,P0,M,016,apps/api/src/routes/v1/,Capabilities and immutable models endpoints,Installed runnable and policy allowed distinguished; permissions enforced
+VLSDK-018,G3 Backend,P0,L,016;011,apps/api/src/assets/,Safe media staging and CAS asset ingestion,Byte MIME dimension limits and SHA 256 atomic commit tests
+VLSDK-019,G3 Backend,P0,L,016;012,apps/api/src/jobs/,Durable transactional job and idempotency admission,202 Location after commit; same payload repeat same job; conflict 409
+VLSDK-020,G3 Backend,P0,M,019,apps/api/src/jobs/,Lease queue transition and crash recovery,Restart preserves accepted jobs; no double terminal result
+VLSDK-021,G3 Backend,P0,L,007;020,apps/api/src/workers/,Supervised Python JSONL v1 handshake,Invalid protocol crash huge line and timeouts fail safely
+VLSDK-022,G3 Backend,P0,M,019;020,apps/api/src/jobs/,Durable event stream SSE with replay,Monotonic seq Last-Event-ID and cursor expiration tested
+VLSDK-023,G3 Backend,P0,M,019;021,apps/api/src/jobs/,Cancellation semantics and worker kill escalation,Abort wait not cancel job; concurrent cancel vs success deterministic
+VLSDK-024,G3 Backend,P0,M,018;021,apps/api/src/artifacts/,Artifact commit metadata download with ACL,Hash verified before success; forbidden cross-workspace read
+VLSDK-025,G3 Backend,P0,L,017;018;019;020;021;022;023;024,tests/integration/,One vertical vision.predict CPU E2E backend,Auth upload 202 worker result SSE artifacts and failure injection pass
+VLSDK-026,G4 Python remote,P0,M,013;025,python/visionlens/src/visionlens/remote/,Python sync HTTP client with typed models,No Torch dep; error retries and idempotency behavior pass
+VLSDK-027,G4 Python remote,P1,M,026,python/visionlens/src/visionlens/remote/,Python async client and safe SSE event parser,Cancellation closes wait only; cursor and connection retry work
+VLSDK-028,G4 TS HTTP,P0,M,013;025,packages/sdk/src/client/,Browser safe typed fetch HTTP client,Bundle graph excludes node modules and native ML libs
+VLSDK-029,G4 TS HTTP,P0,M,028,packages/sdk/src/client/,TS retries auth token and abort behavior,Retry only idempotent; honor Retry-After; never log token
+VLSDK-030,G4 TS HTTP,P0,M,028;022,packages/sdk/src/client/events.ts,TS SSE parser cursor reconnection,Multiline events partial chunks reconnect and expiry tested
+VLSDK-031,G4 Conformance,P0,M,014;026;028;030,tests/contract/,Same cross-transport job with Python and TS,Stable semantic hashes and typed errors equal; numeric tolerances recorded
+VLSDK-032,G4 Compat,P0,M,002;028,packages/sdk/package.json,Preserve npm root legacy and add client export,Pack installed in fresh consumers; export snapshot unchanged
+VLSDK-033,G5 Node local,P2,M,021;032,packages/sdk/src/node/,Opt-in Node local worker bridge,No leaking Node modules into client; close kills scoped worker
+VLSDK-034,G5 Browser,P0,M,028;032,packages/sdk/test/browser/,Cross-runtime browser Node and Next smoke,Browser and SSR bundles import client without native deps
+VLSDK-035,G5 Release,P1,M,010;032;031,ci/release/,PyPI and npm trusted publisher dry runs,Release artifact from protected CI with OIDC and no publisher secret
+VLSDK-036,G5 Docs,P0,M,025;026;028,docs/quickstart/,Four first-use guides with runnable fixtures,Python local remote TS and curl examples verified against alpha
+VLSDK-037,G5 Security,P0,L,025;031,tests/security/,Threat model tests and production hardening review,Auth IDOR upload bombs CSRF rebinding quota egress and logs verified
+VLSDK-038,G5 Ops,P1,M,020;024,ops/,Observability backup restore and rollout gates,Metrics trace cancellation and CAS SQLite restore drill evidence
+VLSDK-039,G6 CV packs,P1,L,025;031,python/visionlens/src/visionlens/tasks/,Classification lab 09 with eval suite,Locked split provenance F1 calibration and CPU dataset fixture
+VLSDK-040,G6 CV packs,P1,L,039,python/visionlens/src/visionlens/tasks/,Retrieval lab 14 via encoder and index snapshot,Encoder digest index rebuild and recall at k evaluator validated

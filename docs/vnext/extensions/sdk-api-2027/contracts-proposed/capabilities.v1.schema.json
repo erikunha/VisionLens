@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.visionlens.example/candidate/p3/capabilities.v1.schema.json",
+  "title": "VisionLens Phase III candidate capabilities.v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "data",
+    "meta"
+  ],
+  "properties": {
+    "data": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "contractVersion",
+        "features"
+      ],
+      "properties": {
+        "apiVersion": {
+          "const": "v1"
+        },
+        "contractVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$"
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "taskKind",
+              "supportedByCode",
+              "installed",
+              "runnableOnDevice",
+              "allowedByPolicy",
+              "device",
+              "reasonCode"
+            ],
+            "properties": {
+              "taskKind": {
+                "enum": [
+                  "image.classification",
+                  "image.detection",
+                  "image.ocr",
+                  "image.ppe",
+                  "image.retrieval",
+                  "image.matting",
+                  "video.counting",
+                  "image.medical_research"
+                ]
+              },
+              "supportedByCode": {
+                "type": "boolean"
+              },
+              "installed": {
+                "type": "boolean"
+              },
+              "runnableOnDevice": {
+                "type": "boolean"
+              },
+              "allowedByPolicy": {
+                "type": "boolean"
+              },
+              "device": {
+                "anyOf": [
+                  {
+                    "enum": [
+                      "cpu",
+                      "mps",
+                      "cuda"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reasonCode": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestId"
+      ],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160,
+          "pattern": "^[a-zA-Z0-9._:@-]+$"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "operation": "vision.predict",
+  "params": {
+    "taskKind": "image.classification",
+    "modelId": "model_001"
+  },
+  "budget": {
+    "maxSeconds": 120,
+    "maxUsdMicro": 0
+  }
+}

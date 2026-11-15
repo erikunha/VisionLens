@@ -1,0 +1,8 @@
+{
+  "jobId": "job_001",
+  "seq": 2,
+  "kind": "progress",
+  "status": "running",
+  "completed": 3,
+  "total": 10
+}

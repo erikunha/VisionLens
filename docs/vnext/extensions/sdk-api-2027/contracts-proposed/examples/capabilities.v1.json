@@ -1,0 +1,29 @@
+{
+  "data": {
+    "apiVersion": "v1",
+    "contractVersion": "1.0.0",
+    "features": [
+      {
+        "taskKind": "image.classification",
+        "supportedByCode": true,
+        "installed": true,
+        "runnableOnDevice": true,
+        "allowedByPolicy": true,
+        "device": "cpu",
+        "reasonCode": null
+      },
+      {
+        "taskKind": "image.medical_research",
+        "supportedByCode": true,
+        "installed": false,
+        "runnableOnDevice": false,
+        "allowedByPolicy": false,
+        "device": null,
+        "reasonCode": "RESEARCH_ONLY"
+      }
+    ]
+  },
+  "meta": {
+    "requestId": "req_003"
+  }
+}
