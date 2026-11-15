@@ -4,11 +4,11 @@ The trainer is the loop of the first rung: it trains on the `train`
 partition, it selects on the `val` partition, it publishes a checkpoint at
 every interval of epochs and it records the device, the curve, the
 throughput and the read. These tests cover the properties the ticket names
-(FR-003, FR-015, FR-016 and FR-025): the run never reads the test
-partition, the checkpoint lands at the interval, the device is recorded with
-the reason of its fallback, the cold and the warm read are reported
-separately, and the frozen artifact of features is REUSED and checked
-against the recipe.
+(`docs/vnext/specs/VLN-009-encoder-probe-training.md:14` and `:22`): the run
+never reads the test partition, the checkpoint lands at the interval, the
+device is recorded with the reason of its fallback, the cold and the warm
+read are reported separately, and the frozen artifact of features is REUSED
+and checked against the recipe.
 
 The fixture is the TRACKED split of the repository, with the vectors the
 fixture needs: every class of the gold vocabulary gets its own unit vector,
@@ -63,7 +63,7 @@ HYPERPARAMETERS: Dict[str, Any] = {
 }
 
 #: The epochs of the fixture and the interval of its checkpoints.
-EPOCHS = 50
+EPOCHS = 51
 CHECKPOINT_INTERVAL = 2
 
 
@@ -147,7 +147,12 @@ def write_feature_artifact(
     `poison_index` writes a value that is not a number in one vector, so
     that the refusal of the loader for it can be observed.
     """
-    vectors = [_vector_of(item.label_key, label_keys, dimension) for item in items]
+    # The assets are written in the REVERSE order of the items: the pairing
+    # of a vector with an item is by the digest of the image, and a fixture
+    # that wrote the assets in the order of the items would prove nothing,
+    # because a loader that paired by the POSITION would pass it.
+    ordered = tuple(reversed(items))
+    vectors = [_vector_of(item.label_key, label_keys, dimension) for item in ordered]
     if poison_index is not None:
         poisoned = list(vectors[poison_index])
         poisoned[0] = float("nan")
@@ -161,7 +166,7 @@ def write_feature_artifact(
         preprocessing_fingerprint=preprocessing,
         preprocessing_components={},
         snapshot_id="fixture-snapshot",
-        asset_sha256=tuple(item.digest for item in items),
+        asset_sha256=tuple(item.digest for item in ordered),
         count=len(vectors),
         dimension=dimension,
         dtype="float32",
