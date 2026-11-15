@@ -2,18 +2,21 @@
 
 The trainer is the loop of the first rung: it trains on the `train`
 partition, it selects on the `val` partition, it publishes a checkpoint at
-every interval of epochs and it records the device, the curve and the read.
-These tests cover the properties the ticket names (FR-003, FR-015, FR-016 and
-FR-025): the run never reads the test partition, the checkpoint lands at the
-interval, the device is recorded with the reason of the fallback, the cold
-and the warm read are reported separately, and the frozen artifact of
-features is REUSED and checked against the recipe.
+every interval of epochs and it records the device, the curve, the
+throughput and the read. These tests cover the properties the ticket names
+(FR-003, FR-015, FR-016 and FR-025): the run never reads the test
+partition, the checkpoint lands at the interval, the device is recorded with
+the reason of its fallback, the cold and the warm read are reported
+separately, and the frozen artifact of features is REUSED and checked
+against the recipe.
 
-The fixture is tiny and built so the classes are separable: eight train
-items, four validation items and four test items, two classes, two
-dimensions. The artifact of features carries the vectors of the train and of
-the validation items ONLY, so a trainer that asked for the test items would
-be refused instead of silently training on them.
+The fixture is the TRACKED split of the repository, with the vectors the
+fixture needs: every class of the gold vocabulary gets its own unit vector,
+so the classes are separable and the fit reaches a hundred percent of the
+train and of the validation accuracy. The artifact of features carries the
+vectors of the train and of the validation items ONLY, so a trainer that
+asked for the test items would be refused instead of silently training on
+them.
 """
 
 from __future__ import annotations
@@ -32,12 +35,10 @@ from visionlens.inference.artifact import (
 )
 from visionlens.training.checkpoint import MANIFEST_SUFFIX, read_checkpoint
 from visionlens.training.features import FeatureError, FeatureSet, load_features
-from visionlens.training.probe import NO_WEIGHT
 from visionlens.training.recipe import (
     TrainRecipe,
     default_class_weights,
     label_key_of,
-    ontology_version_of,
     recipe_fingerprint,
     resolve_recipe,
 )
@@ -61,39 +62,23 @@ HYPERPARAMETERS: Dict[str, Any] = {
     "solver": "lbfgs",
 }
 
-NORMAL = "normal"
-DEFECT = "defect:candle"
-
-#: The dimension of the fixture.
-DIMENSION = 2
-
 #: The epochs of the fixture and the interval of its checkpoints.
 EPOCHS = 3
 CHECKPOINT_INTERVAL = 2
 
 
-def _digest_of(name: str) -> str:
-    """A stable digest for a fixture item."""
-    return f"{abs(hash(name)) % (10 ** 16):016x}" + "0" * 48
-
-
-def _vector_of(label_key: str, index: int, dimension: int = DIMENSION) -> Tuple[float, ...]:
-    """The vector of a fixture item: the classes sit far apart."""
-    base = (2.0 + index * 0.05, 2.0 - index * 0.05)
-    if label_key != NORMAL:
-        base = (-base[0], -base[1])
-    if dimension <= 2:
-        return base[:dimension]
-    return base + (0.0,) * (dimension - 2)
+def _assignments() -> List[Dict[str, Any]]:
+    """The assignments of the tracked split."""
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    return list(split["assignments"])
 
 
 def _label_keys_of_split() -> List[str]:
     """The label keys of the tracked split."""
-    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
     return sorted(
         {
             label_key_of(assignment["class"], assignment["anomaly"])
-            for assignment in split["assignments"]
+            for assignment in _assignments()
         }
     )
 
@@ -101,8 +86,8 @@ def _label_keys_of_split() -> List[str]:
 def fixture_recipe() -> TrainRecipe:
     """The recipe of the fixture.
 
-    The recipe is the tracked one, narrowed to the class space of the
-    fixture and to its dimension, so the trainer runs against a recipe the
+    The recipe is the tracked one, narrowed to the epochs and to the
+    dimension of the fixture, so the trainer runs against a recipe the
     resolver really produced.
     """
     recipe = resolve_recipe(
@@ -112,11 +97,10 @@ def fixture_recipe() -> TrainRecipe:
         class_weights=default_class_weights(_label_keys_of_split()),
         hyperparameters=HYPERPARAMETERS,
     )
+    dimension = len(_label_keys_of_split())
     narrowed = replace(
         recipe,
-        class_weights={NORMAL: NO_WEIGHT, DEFECT: NO_WEIGHT},
-        ontology_version=ontology_version_of([NORMAL, DEFECT]),
-        encoder=replace(recipe.encoder, output_shape={"dimension": DIMENSION}),
+        encoder=replace(recipe.encoder, output_shape={"dimension": dimension}),
         hyperparameters={"C": 1.0, "maxIterations": EPOCHS, "solver": "lbfgs"},
         max_epochs=EPOCHS,
         checkpoint_interval=CHECKPOINT_INTERVAL,
@@ -125,25 +109,8 @@ def fixture_recipe() -> TrainRecipe:
 
 
 def fixture_items() -> Tuple[SplitItem, ...]:
-    """The items of the fixture: eight train, four validation, four test."""
-    items: List[SplitItem] = []
-    for partition, per_class, label_keys in (
-        ("train", 4, (NORMAL, DEFECT)),
-        ("val", 2, (NORMAL, DEFECT)),
-        ("test", 2, (NORMAL, DEFECT)),
-    ):
-        for label_key in label_keys:
-            for index in range(per_class):
-                name = f"{partition}-{label_key}-{index}"
-                items.append(
-                    SplitItem(
-                        item_id=name,
-                        digest=_digest_of(name),
-                        label_key=label_key,
-                        partition=partition,
-                    )
-                )
-    return tuple(items)
+    """The items of the tracked split: 420 train, 140 validation, 140 test."""
+    return split_items_of(_assignments())
 
 
 def _selected_items() -> Tuple[SplitItem, ...]:
@@ -153,20 +120,29 @@ def _selected_items() -> Tuple[SplitItem, ...]:
     )
 
 
+def _vector_of(
+    label_key: str, label_keys: Tuple[str, ...], dimension: int
+) -> Tuple[float, ...]:
+    """The unit vector of the class of an item."""
+    index = label_keys.index(label_key)
+    unit = tuple(1.0 if position == index else 0.0 for position in range(len(label_keys)))
+    if dimension <= len(unit):
+        return unit[:dimension]
+    return unit + (0.0,) * (dimension - len(unit))
+
+
 def write_feature_artifact(
     root: Path,
     items: Tuple[SplitItem, ...],
     *,
     revision: str,
     preprocessing: str,
-    dimension: int = DIMENSION,
+    dimension: int,
+    label_keys: Tuple[str, ...],
     run_id: str = "fixture-run",
 ) -> Path:
     """Writes the artifact of features of the fixture items."""
-    vectors = [
-        _vector_of(item.label_key, index, dimension)
-        for index, item in enumerate(items)
-    ]
+    vectors = [_vector_of(item.label_key, label_keys, dimension) for item in items]
     manifest = EmbeddingRunManifest(
         embedding_run_id=run_id,
         model_id=MODEL_ID,
@@ -199,6 +175,8 @@ def feature_directory(tmp_path: Path, recipe: TrainRecipe) -> Path:
         _selected_items(),
         revision=recipe.encoder.revision,
         preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
     )
 
 
@@ -239,7 +217,50 @@ def test_the_run_never_reads_the_test_partition(tmp_path: Path) -> None:
 
     read = set(run.read_items)
     assert read == {item.item_id for item in _selected_items()}
-    assert not any(item.partition == "test" for item in fixture_items() if item.item_id in read)
+    assert not any(
+        item.partition == "test" for item in fixture_items() if item.item_id in read
+    )
+
+
+def test_an_item_the_recipe_does_not_pin_is_refused(tmp_path: Path) -> None:
+    """A run over items nobody pinned is a run nobody can reproduce."""
+    recipe = fixture_recipe()
+    items = list(fixture_items())
+    items[0] = replace(items[0], item_id="a-item-the-recipe-does-not-pin")
+
+    with pytest.raises(TrainerError) as failure:
+        train(
+            recipe,
+            tuple(items),
+            [feature_directory(tmp_path, recipe)],
+            tmp_path / "checkpoints",
+        )
+
+    assert failure.value.code == "TRAINER_PARTITION_MISMATCH"
+    assert "partitions.train" in failure.value.field
+
+
+def test_an_item_of_the_test_partition_in_the_selection_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The selection code and the evaluation code are separate modules."""
+    recipe = fixture_recipe()
+    items = list(fixture_items())
+    locked = next(item for item in items if item.partition == "test")
+    first_train = next(item for item in items if item.partition == "train")
+    items[items.index(first_train)] = replace(
+        first_train, item_id=locked.item_id, digest=locked.digest
+    )
+
+    with pytest.raises(TrainerError) as failure:
+        train(
+            recipe,
+            tuple(items),
+            [feature_directory(tmp_path, recipe)],
+            tmp_path / "checkpoints",
+        )
+
+    assert failure.value.code == "TRAINER_PARTITION_MISMATCH"
 
 
 def test_the_checkpoint_lands_at_the_interval_and_at_the_last_epoch(
@@ -272,9 +293,7 @@ def test_the_run_records_the_device_and_the_reason_of_the_fallback(
     tmp_path: Path,
 ) -> None:
     """The device of the run and the reason of the fallback are recorded."""
-    recipe = replace(
-        fixture_recipe(), device_policy="auto", fingerprint=""
-    )
+    recipe = replace(fixture_recipe(), device_policy="auto")
     recipe = replace(recipe, fingerprint=recipe_fingerprint(recipe))
 
     run = train(
@@ -286,7 +305,8 @@ def test_the_run_records_the_device_and_the_reason_of_the_fallback(
 
     assert run.device == "cpu"
     assert run.requested_device == "auto"
-    assert "cpu" in run.fallback_reason
+    assert "cpu" in run.device_reason.lower()
+    assert "cpu" in run.fallback_reason.lower()
 
 
 def test_a_device_the_build_does_not_admit_is_refused(tmp_path: Path) -> None:
@@ -308,7 +328,7 @@ def test_a_device_the_build_does_not_admit_is_refused(tmp_path: Path) -> None:
 
 
 def test_the_cold_and_the_warm_read_are_reported_separately(tmp_path: Path) -> None:
-    """The first read and the median of the rest are two numbers."""
+    """The first read and the percentiles of the rest are separate numbers."""
     recipe = fixture_recipe()
     run = train(
         recipe,
@@ -319,9 +339,26 @@ def test_the_cold_and_the_warm_read_are_reported_separately(tmp_path: Path) -> N
 
     assert run.cold_read_ms > 0.0
     assert run.warm_read_p50_ms > 0.0
+    assert run.warm_read_p95_ms > 0.0
     wire = run.to_dict()
     assert wire["coldReadMs"] == run.cold_read_ms
     assert wire["warmReadP50Ms"] == run.warm_read_p50_ms
+    assert wire["warmReadP95Ms"] == run.warm_read_p95_ms
+
+
+def test_the_run_records_the_throughput_and_the_peak_memory(tmp_path: Path) -> None:
+    """The run carries the numbers the hardware matrix asks for."""
+    recipe = fixture_recipe()
+    run = train(
+        recipe,
+        fixture_items(),
+        [feature_directory(tmp_path, recipe)],
+        tmp_path / "checkpoints",
+    )
+
+    assert run.throughput_per_second > 0.0
+    assert run.peak_memory_bytes is not None
+    assert run.to_dict()["throughputPerSecond"] == run.throughput_per_second
 
 
 def test_the_feature_artifact_is_reused_and_never_recomputed(tmp_path: Path) -> None:
@@ -338,8 +375,8 @@ def test_the_feature_artifact_is_reused_and_never_recomputed(tmp_path: Path) -> 
     )
 
     assert (directory / VECTORS_FILE_NAME).read_bytes() == before
-    assert run.feature_digest == run.feature_digest
-    assert len(run.feature_digest) == 64
+    assert len(run.feature_digests) == 1
+    assert len(run.feature_digests[0]) == 64
 
 
 def test_an_empty_train_partition_is_refused(tmp_path: Path) -> None:
@@ -355,7 +392,7 @@ def test_an_empty_train_partition_is_refused(tmp_path: Path) -> None:
             tmp_path / "checkpoints",
         )
 
-    assert failure.value.code == "TRAINER_PARTITION_EMPTY"
+    assert failure.value.code == "TRAINER_PARTITION_MISMATCH"
 
 
 def test_the_early_stopping_of_the_next_rung_is_refused(tmp_path: Path) -> None:
@@ -406,7 +443,7 @@ def test_the_loader_pairs_the_vectors_by_the_digest_of_the_image(
     )
 
     assert feature_set.item_ids == tuple(item.item_id for item in items)
-    assert feature_set.dimension == DIMENSION
+    assert feature_set.dimension == recipe.encoder.output_shape["dimension"]
     assert feature_set.revision == recipe.encoder.revision
     assert feature_set.preprocessing_fingerprint == (
         recipe.encoder.preprocessing_fingerprint
@@ -424,6 +461,8 @@ def test_an_artifact_of_another_revision_is_refused_naming_both_sides(
         _selected_items(),
         revision="another-revision",
         preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
     )
 
     with pytest.raises(FeatureError) as failure:
@@ -448,6 +487,8 @@ def test_an_artifact_of_another_preprocessing_is_refused_naming_both_sides(
         _selected_items(),
         revision=recipe.encoder.revision,
         preprocessing="another-preprocessing",
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
     )
 
     with pytest.raises(FeatureError) as failure:
@@ -473,7 +514,8 @@ def test_an_artifact_of_another_dimension_is_refused_naming_both_sides(
         items,
         revision=recipe.encoder.revision,
         preprocessing=recipe.encoder.preprocessing_fingerprint,
-        dimension=DIMENSION + 1,
+        dimension=recipe.encoder.output_shape["dimension"] + 1,
+        label_keys=tuple(_label_keys_of_split()),
     )
 
     with pytest.raises(FeatureError) as failure:
@@ -484,8 +526,8 @@ def test_an_artifact_of_another_dimension_is_refused_naming_both_sides(
         )
 
     assert failure.value.code == "FEATURES_DIMENSION_MISMATCH"
-    assert str(DIMENSION + 1) in failure.value.reason
-    assert str(DIMENSION) in failure.value.reason
+    assert str(recipe.encoder.output_shape["dimension"] + 1) in failure.value.reason
+    assert str(recipe.encoder.output_shape["dimension"]) in failure.value.reason
 
 
 def test_an_artifact_that_mixes_two_revisions_is_refused_naming_the_two(
@@ -500,6 +542,8 @@ def test_an_artifact_that_mixes_two_revisions_is_refused_naming_the_two(
         items[:half],
         revision=recipe.encoder.revision,
         preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
         run_id="first-run",
     )
     second = write_feature_artifact(
@@ -507,6 +551,8 @@ def test_an_artifact_that_mixes_two_revisions_is_refused_naming_the_two(
         items[half:],
         revision="another-revision",
         preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
         run_id="second-run",
     )
 
@@ -534,6 +580,8 @@ def test_an_artifact_that_mixes_two_preprocessings_is_refused_naming_the_two(
         items[:half],
         revision=recipe.encoder.revision,
         preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
         run_id="first-run",
     )
     second = write_feature_artifact(
@@ -541,6 +589,8 @@ def test_an_artifact_that_mixes_two_preprocessings_is_refused_naming_the_two(
         items[half:],
         revision=recipe.encoder.revision,
         preprocessing="another-preprocessing",
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
         run_id="second-run",
     )
 
@@ -554,6 +604,42 @@ def test_an_artifact_that_mixes_two_preprocessings_is_refused_naming_the_two(
     assert failure.value.code == "FEATURES_MIXED_PREPROCESSING"
     assert "another-preprocessing" in failure.value.reason
     assert recipe.encoder.preprocessing_fingerprint in failure.value.reason
+
+
+def test_an_artifact_of_another_dimension_beside_the_first_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Every artifact of the run is checked, not only the first one."""
+    recipe = fixture_recipe()
+    items = _selected_items()
+    half = len(items) // 2
+    first = write_feature_artifact(
+        tmp_path / "features",
+        items[:half],
+        revision=recipe.encoder.revision,
+        preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
+        run_id="first-run",
+    )
+    second = write_feature_artifact(
+        tmp_path / "features",
+        items[half:],
+        revision=recipe.encoder.revision,
+        preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"] + 1,
+        label_keys=tuple(_label_keys_of_split()),
+        run_id="second-run",
+    )
+
+    with pytest.raises(FeatureError) as failure:
+        load_features(
+            [first, second],
+            recipe,
+            [(item.item_id, item.digest) for item in items],
+        )
+
+    assert failure.value.code == "FEATURES_DIMENSION_MISMATCH"
 
 
 def test_a_digest_that_names_two_items_is_refused(tmp_path: Path) -> None:
@@ -623,8 +709,8 @@ def test_the_split_items_carry_the_label_key_of_the_taxonomy() -> None:
         ]
     )
 
-    assert items[0].label_key == DEFECT
-    assert items[1].label_key == NORMAL
+    assert items[0].label_key == "defect:candle"
+    assert items[1].label_key == "normal"
     assert items[0].partition == "train"
     assert items[1].partition == "val"
 
