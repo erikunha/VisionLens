@@ -3,8 +3,8 @@ recipe.
 
 The trainer NEVER recomputes the features: the vectors of a run come from
 the artifact of the encoder, and the artifact is REUSED as it is
-(`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:23`, FR-025 of the
-ticket). Training and inference may not see two different preprocessing
+(`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:23`, and the M0 rung of
+`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`). Training and inference may not see two different preprocessing
 pipelines, and the place where that is proved is here: the loader compares
 the artifact with the recipe and refuses what does not agree.
 

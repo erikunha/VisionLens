@@ -2,8 +2,10 @@
 
 The modules of this package are the training side of the platform: the
 pinned recipe of a run, the frozen features it consumes, the estimator of
-the M0 rung, the checkpoint it writes, the report it publishes and the
-trainer that ties them together.
+the M0 rung, the checkpoint it writes and the trainer that ties them
+together. The report of the run and the holdout evaluation are NOT in this
+package yet: the run is recorded, and the record is the whole of what
+exists.
 
 The recipe imports nothing heavy: it reads two files and computes a digest,
 so the base install of the package stays free of scikit-learn and numpy.
