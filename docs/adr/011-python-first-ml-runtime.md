@@ -379,8 +379,9 @@ publication. Those remain gated by the acceptance conditions below.
 
 ## Supersession record against ADR-006
 
-ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
-(`docs/vnext/00-ADOPTION-NO-OVERWRITE.md:36`).
+ADR-006 stays unchanged in substance; this ADR supersedes part of it by addition
+(`docs/vnext/00-ADOPTION-NO-OVERWRITE.md:36`). ADR-006 was later amended in one line, to
+name the single bin this repository ships, and that amendment is recorded in that ADR.
 
 | ADR-006 clause | Line | Disposition |
 |---|---|---|
@@ -395,7 +396,7 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
 
 | Surface | Rule | Today |
 |---|---|---|
-| CLI bins | `vision-lens` is the only bin (`docs/vnext/02-ARCHITECTURE-DECISION.md:30`) | one bin (`packages/cli/package.json:9-11`); the alias of the earlier name is gone, and the CLI package was never published |
+| CLI bins | `vision-lens` is the only bin | one bin (`packages/cli/package.json:9-11`); the alias of the earlier name is gone, and the CLI package was never published |
 | npm SDK | root exports are kept until a versioned migration; a lightweight client is a new entrypoint, never a silent replacement (`docs/vnext/02-ARCHITECTURE-DECISION.md:31`) | exports still `.` and `./cli` (`packages/sdk/package.json:7-9`); `./client` not yet added |
 | Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:248`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
 | Store | forward-only migrations, SQLite store preserved, not replaced (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:5`) | `packages/core/src/store/migrations/` |
@@ -460,14 +461,14 @@ Migration proof, per `docs/vnext/02-ARCHITECTURE-DECISION.md:37`:
 | Acceptance condition | Status as built |
 |---|---|
 | Dual-runtime parity on one golden inference path | partially proven: the cross-language suite runs the real TS host against the real Python worker (`packages/core/tests/worker/python-integration.test.ts:21-34`), the pack's frame examples validate in both languages (`packages/contracts/tests/worker/pack-examples.test.ts`, `python/visionlens/tests/test_pack_examples.py`), and the Python golden transcript pins one scripted session byte for byte (`python/visionlens/src/visionlens/golden/__init__.py:1`); a real-model golden path lands with the CPU vision adapter (spec 019) |
-| The old Node CLI suite stays green | unchanged by this ADR; the CLI bins and exports are untouched |
+| The old Node CLI suite stays green | unchanged by this ADR; the CLI bin and the exports are untouched |
 | Python works standalone and packages into a wheel | the package builds its wheel from `src/visionlens` (`python/visionlens/pyproject.toml:40-41`); the container image consumes it (`docker/runtime/`) |
 | `@vision-lens/sdk/client` calls the application API with no Python in the JS consumer environment | not yet built; the entrypoint does not exist (`packages/sdk/package.json:7-9`) |
 
 Rollback: revert the commit that carries this ADR, the owner map and the static check. This
 decision changes no runtime code, no migration and no data, so reverting restores the previous
-behavior exactly, and ADR-006, never edited, still stands on its own terms
-(`docs/vnext/00-ADOPTION-NO-OVERWRITE.md:36`).
+behavior exactly, and ADR-006, amended only by the recorded removal of the CLI alias, still
+stands on its own terms (`docs/vnext/00-ADOPTION-NO-OVERWRITE.md:36`).
 
 ## Validation before acceptance
 
@@ -478,9 +479,10 @@ Carried from the pack's own ADR-011 (`docs/vnext/adrs/ADR-011-python-first-ml-ru
    and 010 are unaffected.
 2. One implementation-compatible golden path and a rollback strategy: the cross-language suite
    and the golden transcript named above; the rollback is the revert above.
-3. Shipped TypeScript features and the compatibility aliases preserved: both CLI bins
-   (`packages/cli/package.json:10-11`) and the SDK exports (`packages/sdk/package.json:7-9`)
-   unchanged.
+3. Shipped TypeScript features and the compatibility aliases preserved: the canonical CLI bin
+   (`packages/cli/package.json:9-11`) and the SDK exports (`packages/sdk/package.json:7-9`)
+   unchanged. The alias of the earlier bin name was removed in a later change, because the CLI
+   package was never published and no published consumer depended on it.
 4. Source docs and the architecture tests updated in one focused change: the owner map, the
    static check and its suite, all in the same change as this ADR.
 
