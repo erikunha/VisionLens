@@ -29,11 +29,11 @@ Three facts decide the shape of the implementation:
   are produced by the encoder and REUSED, never recomputed: a trainer that
   recomputed the vectors would train on a pipeline nobody pinned, and the
   vectors of the training and of the inference would not be the same vectors
-  (FR-025 of the local spec of the ticket).
+  (`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`).
 - The selection code and the evaluation code are separate modules. The
   trainer trains on `train` and selects on `val`; the locked `test` partition
-  belongs to the holdout evaluation, which does not exist yet (FR-003 of the
-  local spec of the ticket).
+  belongs to the holdout evaluation, which does not exist yet
+  (`docs/vnext/specs/VLN-009-encoder-probe-training.md:14`).
 - The CPU is the reference behavior and a silent fallback is forbidden
   (`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`, `:12`).
 
@@ -87,8 +87,8 @@ an artifact that does not agree with the recipe.**
    use (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
 9. The run records the THROUGHPUT of the fit and the PEAK MEMORY of the
    process, so the numbers the hardware matrix asks for are in the record of
-   the run and not only in the record of the report (FR-015 and FR-016 of the
-   local spec of the ticket).
+   the run and not only in the record of the report
+   (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
 10. The checkpoint is published at every interval of epochs and at the last
     epoch, each one addressed by its own digest.
 

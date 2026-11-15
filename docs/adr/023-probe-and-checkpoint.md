@@ -99,8 +99,7 @@ and with the divergence of the tree recorded below.
    checkpoint file, the class map of the run and the epoch it was written
    at, and a reader that hashes the file and finds another digest REFUSES
    the checkpoint instead of loading it (`docs/vnext/specs/VLN-009-encoder-probe-training.md:22`,
-   the acceptance criterion of the checkpoint; FR-006 of the local spec of
-   the ticket). The digest
+   the acceptance criterion of the checkpoint). The digest
    is checked BEFORE the file is parsed, so a checkpoint whose bytes are
    not the bytes the manifest names is never loaded at all.
 7. The PUBLICATION is atomic and it is ordered. The checkpoint file is
