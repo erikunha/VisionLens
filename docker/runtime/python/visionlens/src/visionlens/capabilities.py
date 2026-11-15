@@ -46,6 +46,16 @@ EXTRA_CAPABILITY_MODULES: Mapping[str, tuple[str, ...]] = {
 #: Every declared extra, in the order the distribution declares them.
 EXTRA_NAMES: tuple[str, ...] = ("vision", "training", "agents", "server", "all")
 
+#: The extras that the aggregate extra carries.
+#:
+#: The aggregate installs the self references that the distribution declares,
+#: and nothing else. An aggregate that named the stack of an extra it does
+#: not install reports itself absent on a machine that installed it, and a
+#: report that says that the build cannot do what it can do is a report that
+#: lies. The test that reads the `pyproject.toml` proves that this tuple is
+#: the union of the extras the distribution really declares.
+ALL_EXTRAS: tuple[str, ...] = ("vision", "training")
+
 
 class ExtraCapability(BaseModel):
     """The state of one declared extra in this environment."""
@@ -103,7 +113,7 @@ def resolve_device(device: str) -> tuple[str, str]:
 def _modules_for(extra: str) -> tuple[str, ...]:
     if extra == "all":
         modules: list[str] = []
-        for name in ("vision", "training", "agents", "server"):
+        for name in ALL_EXTRAS:
             for module in EXTRA_CAPABILITY_MODULES[name]:
                 if module not in modules:
                     modules.append(module)

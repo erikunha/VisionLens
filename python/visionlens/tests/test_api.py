@@ -267,6 +267,30 @@ def test_the_capability_map_names_only_what_the_extra_installs():
                 "map may not name a module the extra does not carry"
             )
 
+    # The aggregate extra installs the SELF REFERENCES that the distribution
+    # declares. A map that unions the stack of an extra the aggregate does
+    # not install reports the aggregate as absent on a machine that installed
+    # it, and the report is then wrong in the direction that hides a
+    # capability that is there.
+    from visionlens.capabilities import ALL_EXTRAS, _modules_for
+
+    declared = []
+    for requirement in extras.get("all", []):
+        inner = requirement.partition("[")[2].partition("]")[0]
+        if inner:
+            declared.append(inner)
+
+    assert sorted(declared) == sorted(ALL_EXTRAS), (
+        "the aggregate extra of the distribution declares "
+        f"{declared} and the capability map names {list(ALL_EXTRAS)}"
+    )
+    expected: list[str] = []
+    for name in ALL_EXTRAS:
+        for module in EXTRA_CAPABILITY_MODULES[name]:
+            if module not in expected:
+                expected.append(module)
+    assert list(_modules_for("all")) == expected
+
 
 # --- the image metadata operation ---------------------------------------------
 
