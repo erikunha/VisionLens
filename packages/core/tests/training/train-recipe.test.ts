@@ -168,6 +168,42 @@ describe('the recipe of a training run', () => {
     expect(ontologyVersionOf(['normal'])).not.toBe(version);
   });
 
+  it('computes an address that does not depend on the order of the ids', () => {
+    const recipe = validRecipe();
+    const partitions = recipe['partitions'] as Record<string, string[]>;
+    const shuffled = {
+      ...recipe,
+      partitions: Object.fromEntries(
+        Object.entries(partitions).map(([name, ids]) => [name, [...ids].reverse()]),
+      ),
+    };
+
+    // A partition is a SET of item ids, so the order the ids arrived in is
+    // not part of the configuration, and the Python side sorts them the
+    // same way.
+    expect(trainRecipeFingerprint(shuffled)).toBe(trainRecipeFingerprint(recipe));
+  });
+
+  it('refuses a seed the other side cannot hold exactly', () => {
+    const recipe = { ...validRecipe(), seed: 9007199254740992 };
+
+    const outcome = validateTrainRecipe(recipe);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the recipe should have been refused');
+    expect(outcome.issues.join(' ')).toContain('seed');
+  });
+
+  it('refuses a ceiling of epochs the other side cannot hold exactly', () => {
+    const recipe = { ...validRecipe(), maxEpochs: 9007199254740992 };
+
+    const outcome = validateTrainRecipe(recipe);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the recipe should have been refused');
+    expect(outcome.issues.join(' ')).toContain('maxEpochs');
+  });
+
   it('reads the class space of a recipe from the keys of its class weights', () => {
     const recipe = validRecipe();
     const classWeights = recipe['classWeights'] as Record<string, unknown>;

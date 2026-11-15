@@ -147,6 +147,31 @@ export function validateTrainRecipe(payload: unknown): TrainRecipeValidation {
 }
 
 /**
+ * The recipe in the form the address is computed over.
+ *
+ * A partition is a SET of item ids, so the ids are sorted before the
+ * digest: the address of a recipe is the address of the configuration and
+ * not of the order the items were written in. The Python side sorts them
+ * the same way, over the same UTF-16 code units, so the two sides compute
+ * the address of the same body whatever order the ids arrived in.
+ */
+export function canonicalTrainRecipe(
+  recipe: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const components = { ...recipe };
+  delete components['fingerprint'];
+  const partitions = components['partitions'];
+  if (typeof partitions === 'object' && partitions !== null) {
+    const sorted: Record<string, unknown> = {};
+    for (const [name, ids] of Object.entries(partitions)) {
+      sorted[name] = Array.isArray(ids) ? [...ids].sort() : ids;
+    }
+    components['partitions'] = sorted;
+  }
+  return components;
+}
+
+/**
  * The fingerprint of a recipe, recomputed.
  *
  * The digest covers every field of the recipe EXCEPT the fingerprint
@@ -157,10 +182,8 @@ export function validateTrainRecipe(payload: unknown): TrainRecipeValidation {
 export function trainRecipeFingerprint(
   recipe: Readonly<Record<string, unknown>>,
 ): string {
-  const components = { ...recipe };
-  delete components['fingerprint'];
   const digest = createHash('sha256')
-    .update(canonicalJson(components), 'utf8')
+    .update(canonicalJson(canonicalTrainRecipe(recipe)), 'utf8')
     .digest('hex');
   return `fp2:${digest.slice(0, 16)}`;
 }

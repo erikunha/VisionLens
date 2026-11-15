@@ -27,9 +27,17 @@
  *   - the NUMERIC regime, where every class carries a number, half of them
  *     whole and half of them fractional.
  *
- * A gate that only looked at one regime would let the other one rot: a
- * weight published as the text of a number satisfies a regime of `none`
- * perfectly and is refused by the schema of the other side.
+ * A gate that only looked at one regime would let the other one rot: the
+ * regime of `none` says nothing about the regime of a number, and a weight
+ * published as the text of a number satisfies the regime of `none`
+ * perfectly. The numeric regime also carries a whole number the other side
+ * cannot hold exactly, because a number JavaScript rounds reaches the other
+ * side rounded and the two sides have to write the SAME text for it.
+ *
+ * The gate proves a third thing as well: the address of a recipe does not
+ * depend on the order of the ids of a partition, because a partition is a
+ * SET of ids. The ids of the recipe the Python side publishes are sorted,
+ * so the order is turned around here instead of being assumed.
  *
  * Run: `pnpm exec tsx scripts/training/recipe-parity.ts`
  *
@@ -44,6 +52,7 @@ import { fileURLToPath } from 'node:url';
 
 import { canonicalJson } from '../../packages/contracts/src/fingerprint.js';
 import {
+  canonicalTrainRecipe,
   ontologyVersionOf,
   trainRecipeFingerprint,
   validateTrainRecipe,
@@ -94,10 +103,8 @@ function resolveOnPython(weightsFile?: string): Resolution {
  * the committed source, and not of whatever the build directory holds.
  */
 function fingerprintOfSource(recipe: Readonly<Record<string, unknown>>): string {
-  const components = { ...recipe };
-  delete components['fingerprint'];
   const digest = createHash('sha256')
-    .update(canonicalJson(components), 'utf8')
+    .update(canonicalJson(canonicalTrainRecipe(recipe)), 'utf8')
     .digest('hex');
   return `fp2:${digest.slice(0, 16)}`;
 }
@@ -124,9 +131,9 @@ function checkRecipe(label: string, recipe: Record<string, unknown>): boolean {
   const declared = String(recipe['fingerprint']);
   if (recomputed !== fromSource) {
     console.error(
-      `the build of the contracts and the committed source disagree about the address of ` +
+      `the build of the contracts and its committed source disagree about the address of ` +
         `the ${label} configuration: the build computed ${recomputed} and the source ` +
-        `computed ${fromSource}; the gate proves the source, so run pnpm build first`,
+        `computed ${fromSource}; the gate proves the source, so run pnpm build`,
     );
     return false;
   }
@@ -138,6 +145,31 @@ function checkRecipe(label: string, recipe: Record<string, unknown>): boolean {
     return false;
   }
   console.log(`ok: both sides compute the address ${declared} of the ${label} regime`);
+
+  // A partition is a SET of item ids, so the address of the recipe does not
+  // depend on the order the ids arrived in. The recipe the Python side
+  // publishes carries them sorted, so the order is turned around here to
+  // prove the property instead of assuming it.
+  const partitions = recipe['partitions'];
+  if (typeof partitions === 'object' && partitions !== null) {
+    const reversed: Record<string, unknown> = {};
+    for (const [name, ids] of Object.entries(partitions)) {
+      reversed[name] = Array.isArray(ids) ? [...ids].reverse() : ids;
+    }
+    const shuffled = { ...recipe, partitions: reversed };
+    const addressOfShuffled = trainRecipeFingerprint(shuffled);
+    if (addressOfShuffled !== declared) {
+      console.error(
+        `the address of the ${label} configuration depends on the order of the ids of a ` +
+          `partition: the declared address is ${declared} and the shuffled one is ` +
+          `${addressOfShuffled}; a partition is a set of ids`,
+      );
+      return false;
+    }
+    console.log(
+      `ok: the address of the ${label} regime does not depend on the order of the ids`,
+    );
+  }
 
   // The ontology version is the digest of the class space, and the class
   // space is the set of the keys of the class weights the recipe carries.
