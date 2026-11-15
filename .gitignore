@@ -72,3 +72,4 @@ python/visionlens/release/gate/
 # The vNext specification pack is tracked; keep it re-included in case a future `specs` ignore
 # pattern ever matches it.
 !docs/vnext/specs/
+!docs/vnext/extensions/**/specs/
