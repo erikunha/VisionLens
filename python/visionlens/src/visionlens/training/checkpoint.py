@@ -12,7 +12,8 @@ to a temporary name, hashed, renamed to the name of its own digest, and only
 then is the manifest written and renamed into place. A run that dies in the
 middle leaves a file nobody points at, and never a manifest that points at a
 half written file. The manifest is the publication: a checkpoint without a
-manifest is not published, and a cancelled run publishes nothing at all.
+manifest is not published, and the writer publishes only what it was
+given, so a run that was cancelled publishes nothing.
 
 The checkpoint file is a JSON document and not a pickled estimator. Three
 properties follow from it, and all three are wanted here: the bytes of two
@@ -21,10 +22,11 @@ everywhere; the artifact is readable without running anything; and loading it
 never executes code that came with the file. The parameters of the probe are
 plain numbers, so there is nothing a pickle would carry that JSON cannot.
 
-The resume state is the EPOCH of the manifest: a run that was interrupted
-continues after the epoch the last checkpoint was written at, and the epoch
-of the checkpoint and the epoch of its manifest must agree, because a
-manifest that describes another epoch is a manifest nobody can resume from.
+The resume state is the EPOCH of the manifest: it is the epoch a run
+continues from, and the epoch of the checkpoint and the epoch of its
+manifest must agree, because a manifest that describes another epoch is a
+manifest nobody can resume from. The resume path itself and the cancel
+path belong to the trainer, which is the piece that still has to land.
 """
 
 from __future__ import annotations

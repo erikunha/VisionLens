@@ -114,26 +114,33 @@ and with the divergence of the tree recorded below.
    agree, because a manifest that describes another epoch is a manifest
    nobody can resume from.
 9. The checkpoint file is a JSON document and NOT a pickled estimator. The
-   spec names joblib as the writer of the checkpoint, and the tree says
-   otherwise. The bytes of two machines are the same bytes, so the digest
-   of a run is reproducible everywhere; the artifact is readable without
-   running anything; and loading it never executes code that came with the
-   file. The parameters of the probe are plain numbers, so there is nothing
-   a pickle would carry that JSON cannot. The `training` extra keeps the
-   pin of joblib, because joblib is the reader of the frozen feature
-   artifact, which is the next piece of the ticket.
-10. The REFUSALS of the checkpoint speak the vocabulary of the checkpoint.
+   spec names the FORMAT of the checkpoint nowhere: FR-006 asks for the
+   sha256 of the checkpoint file and for the class map, and the pins of the
+   `training` extra name joblib among the packages of the extra. The format
+   is a decision of this ADR, and JSON is it because the bytes of two
+   machines are the same bytes, so the digest of a run is reproducible
+   everywhere; because the artifact is readable without running anything;
+   and because loading it never executes code that came with the file. The
+   parameters of the probe are plain numbers, so there is nothing a pickle
+   would carry that JSON cannot. The pin of joblib stays in the extra
+   because joblib is the reader of the frozen feature artifact, which is
+   the next piece of the ticket.
+10. A published artifact carries the permissions of the temporary file it
+    was written from, which are the permissions of its owner alone. An
+    artifact of a run may carry the data of a run, and an operator that
+    shares the directory of the run loosens the permissions on purpose.
+11. The REFUSALS of the checkpoint speak the vocabulary of the checkpoint.
     A payload that carries no model, a write that fails and a manifest
     that names a file outside the directory of the run are refusals of the
     checkpoint and not of the probe and not of the operating system: a
     caller of the checkpoint catches one vocabulary and not the other. The
     name of a checkpoint is a NAME and not a path, so a reader never hashes
     a file the run never published.
-11. The rows of a model and the vectors of the run share one dimension, and
+12. The rows of a model and the vectors of the run share one dimension, and
     a model that does not say so is refused when it is read back. A model
     whose rows are shorter than the dimension it declares answers with a
     score computed over half of the vector.
-12. The `all` extra is the aggregate of the capability extras, so it
+13. The `all` extra is the aggregate of the capability extras, so it
     carries the `training` extra from now on.
 
 ## Consequences
@@ -152,10 +159,13 @@ and with the divergence of the tree recorded below.
 **Negative:**
 
 - The trainer, the loader of the frozen features, the resume and the
-  cancel paths, the locked holdout evaluation, the arena comparison and
-  the promotion gate are still open. The probe fits a matrix the trainer
-  has not read yet, and the checkpoint is published by a call the trainer
-  has not made yet.
+  cancel paths, the locked holdout evaluation, the arena comparison, the
+  experiment record, the registration of the model version and the promotion
+  gate are still open. The probe fits a matrix the trainer has not read yet,
+  and the checkpoint is published by a call the trainer has not made yet.
+  The module of the checkpoint carries the epoch that a resume will read,
+  and it refuses a publication that a cancel did not ask for, but the paths
+  themselves belong to the trainer.
 - The joblib pin of the extra is carried by the feature artifact, which
   lands with the next piece of the ticket.
 - The metrics of a run are reported by the shipped scorer and not by this
