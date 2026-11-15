@@ -85,6 +85,12 @@ an artifact that does not agree with the recipe.**
    p50 and the p95 of the rest, by the percentile function of the platform)
    are separate numbers. A number that averages them is a number nobody can
    use (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
+   The FIT predicts NOTHING: it returns the model without computing the
+   accuracy of the train partition, and the run is the one that predicts
+   for the first time. A fit that predicts makes 420 predictions before the
+   run measures its cold read, and the number it records is a warm number
+   under the name of a cold one. The accuracy of the train partition is
+   computed by the run, and the checkpoint carries it.
 9. The run records the THROUGHPUT of the fit and the PEAK MEMORY of the
    process, so the numbers the hardware matrix asks for are in the record of
    the run and not only in the record of the report
