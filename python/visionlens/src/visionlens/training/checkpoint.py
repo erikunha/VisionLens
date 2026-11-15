@@ -393,6 +393,13 @@ def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
             f"the manifest cannot be read: {error}",
         ) from error
     manifest = CheckpointManifest.from_dict(record)
+    if manifest.version != CHECKPOINT_VERSION:
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_INVALID",
+            "manifest.manifestVersion",
+            f"the manifest declares the version '{manifest.version}' and this build speaks "
+            f"the version '{CHECKPOINT_VERSION}'",
+        )
 
     checkpoint_path = path.parent / _checkpoint_file_of(manifest)
     _checked_inside(path.parent, checkpoint_path)
@@ -461,6 +468,22 @@ def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
             "the class map of the checkpoint and the class map of the manifest are not the "
             "same one; a manifest that describes other classes is a manifest nobody can "
             "read back",
+        )
+    if model.dimension != manifest.dimension:
+        raise CheckpointError(
+            "CHECKPOINT_STATE_MISMATCH",
+            "manifest.dimension",
+            f"the checkpoint was fitted over {model.dimension} values and the manifest names "
+            f"{manifest.dimension}; a manifest that describes another model is a manifest "
+            "nobody can reproduce",
+        )
+    if model.seed != manifest.seed:
+        raise CheckpointError(
+            "CHECKPOINT_STATE_MISMATCH",
+            "manifest.seed",
+            f"the checkpoint was fitted with the seed {model.seed} and the manifest names "
+            f"{manifest.seed}; a manifest that describes another model is a manifest nobody "
+            "can reproduce",
         )
     return LoadedCheckpoint(manifest=manifest, model=model)
 

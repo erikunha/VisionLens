@@ -625,3 +625,57 @@ def test_a_checkpoint_that_is_a_symlink_out_of_the_run_is_refused(
         read_checkpoint(run / "checkpoint-000001.manifest.json")
 
     assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
+
+
+
+
+def test_a_manifest_that_names_another_dimension_is_refused(tmp_path: Path) -> None:
+    """The manifest and the checkpoint have to agree about the model."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["dimension"] = 99
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_STATE_MISMATCH"
+
+
+
+
+def test_a_manifest_that_names_another_seed_is_refused(tmp_path: Path) -> None:
+    """The seed of the run is part of the model the manifest describes."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["seed"] = 1234
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_STATE_MISMATCH"
+
+
+
+
+def test_a_manifest_of_another_version_is_refused(tmp_path: Path) -> None:
+    """A manifest of another version is a manifest of another shape."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["manifestVersion"] = "99.0.0"
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
