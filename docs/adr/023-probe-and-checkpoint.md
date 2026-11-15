@@ -66,7 +66,11 @@ and with the divergence of the tree recorded below.
    `none` means the class is NOT WEIGHTED. The weight that is left out of
    the estimator is the default of one and never a zero: a zero weight
    would drop the class from the fit, and a dropped class is a class the
-   run never reports (`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`).
+   run never reports. The pack asks for the class weights to be DOCUMENTED
+   (`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`); what the word `none`
+   MEANS is the decision of this ADR, and it is the decision of the module
+   that owns the fit (`python/visionlens/src/visionlens/training/probe.py`,
+   the function that checks the documented weights).
    The SUPPORT of every class is recorded in the model, and a class whose
    support is below the documented minimum is recorded as a class with an
    insufficient support instead of being lost in the fit. The probe refuses
@@ -94,7 +98,9 @@ and with the divergence of the tree recorded below.
    and it is CONTENT ADDRESSED: the manifest carries the sha256 of the
    checkpoint file, the class map of the run and the epoch it was written
    at, and a reader that hashes the file and finds another digest REFUSES
-   the checkpoint instead of loading it (FR-006 of the ticket). The digest
+   the checkpoint instead of loading it (`docs/vnext/specs/VLN-009-encoder-probe-training.md:22`,
+   the acceptance criterion of the checkpoint; FR-006 of the local spec of
+   the ticket). The digest
    is checked BEFORE the file is parsed, so a checkpoint whose bytes are
    not the bytes the manifest names is never loaded at all.
 7. The PUBLICATION is atomic and it is ordered. The checkpoint file is
@@ -114,8 +120,9 @@ and with the divergence of the tree recorded below.
    agree, because a manifest that describes another epoch is a manifest
    nobody can resume from.
 9. The checkpoint file is a JSON document and NOT a pickled estimator. The
-   spec names the FORMAT of the checkpoint nowhere: FR-006 asks for the
-   sha256 of the checkpoint file and for the class map, and the pins of the
+   spec names the FORMAT of the checkpoint nowhere: the acceptance criterion
+   asks for the sha256 of the checkpoint file and for the class map, and the
+   pins of the
    `training` extra name joblib among the packages of the extra. The format
    is a decision of this ADR, and JSON is it because the bytes of two
    machines are the same bytes, so the digest of a run is reproducible
@@ -124,7 +131,8 @@ and with the divergence of the tree recorded below.
    parameters of the probe are plain numbers, so there is nothing a pickle
    would carry that JSON cannot. The pin of joblib stays in the extra
    because joblib is the reader of the frozen feature artifact, which is
-   the next piece of the ticket.
+   the next piece of the ticket. Joblib arrives with scikit-learn anyway,
+   and the explicit pin of the extra only narrows its range.
 10. A published artifact carries the permissions of the temporary file it
     was written from, which are the permissions of its owner alone. An
     artifact of a run may carry the data of a run, and an operator that

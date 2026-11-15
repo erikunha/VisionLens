@@ -5,7 +5,9 @@ content is an artifact nobody can verify. The manifest of a checkpoint
 carries the sha256 of the checkpoint file, the class map of the run and the
 epoch it was written at, and a reader that hashes the file and finds
 another digest REFUSES the checkpoint instead of loading it
-(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`, FR-006 of the ticket).
+(`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:26`, and the acceptance
+criterion of the checkpoint of the ticket,
+`docs/vnext/specs/VLN-009-encoder-probe-training.md:22`).
 
 The publication is ATOMIC and it is ordered: the checkpoint file is written
 to a temporary name, hashed, renamed to the name of its own digest, and only
