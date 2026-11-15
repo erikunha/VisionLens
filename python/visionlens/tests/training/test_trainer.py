@@ -273,6 +273,57 @@ def test_an_item_of_the_test_partition_in_the_selection_is_refused(
     assert "partitions.test" in failure.value.field
 
 
+def test_the_cold_read_is_the_first_prediction_of_the_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cold read is the FIRST prediction of the run.
+
+    A fit that predicts to compute the accuracy of the train partition
+    makes 420 predictions before the run measures its cold read, and the
+    number it records is a warm number under the name of a cold one.
+    """
+    from visionlens.training import probe as probe_module
+
+    predicted: List[Tuple[float, ...]] = []
+    original = probe_module.ProbeModel.predict
+
+    def counted(self: Any, vector: Any) -> Any:
+        predicted.append(tuple(vector))
+        return original(self, vector)
+
+    monkeypatch.setattr(probe_module.ProbeModel, "predict", counted)
+
+    recipe = fixture_recipe()
+    items = _selected_items()
+    feature_set = load_features(
+        [feature_directory(tmp_path, recipe)],
+        recipe,
+        [(item.item_id, item.digest) for item in items],
+    )
+    val_items = [item for item in items if item.partition == "val"]
+    train_items = [item for item in items if item.partition == "train"]
+
+    train(
+        recipe,
+        fixture_items(),
+        [feature_directory(tmp_path, recipe)],
+        tmp_path / "checkpoints",
+    )
+
+    assert predicted, "the run made no prediction at all"
+    assert predicted[0] == feature_set.vector_of(val_items[0].item_id), (
+        "the first prediction of the run was not the cold one, and a cold read "
+        "that is really warm is a number nobody can use"
+    )
+    # One cold prediction, the curve of the train and of the validation
+    # partition at every epoch, and the warm read of the validation
+    # partition at the end of the run.
+    assert len(predicted) == (
+        1 + EPOCHS * (len(train_items) + len(val_items)) + len(val_items)
+    )
+
+
 def test_the_checkpoint_lands_at_the_interval_and_at_the_last_epoch(
     tmp_path: Path,
 ) -> None:
