@@ -12,8 +12,9 @@ AI-powered image classification, timestamp overlay, and sequential organization 
 > `docs/architecture/baseline-audit.md` and `ROADMAP.md`; work lands on the `feat/visual-lens`
 > branch.
 >
-> **Binary name:** `vision-lens` is the only bin (`pnpm add -g @vision-lens/cli` → `vision-lens`).
-> The compatibility alias of the earlier name is gone: it pointed at the same program, it was
+> **Binary name:** `vision-lens` is the only bin. The CLI package is not published yet, so the
+> bin comes from a clone: `pnpm build` and then `node packages/cli/dist/index.js`. The
+> compatibility alias of the earlier name is gone: it pointed at the same program, it was
 > never published, and a bin nobody installs is a bin nobody keeps. See CHANGELOG.md.
 >
 > **npm packages:** the new identity publishes from the `@vision-lens` scope (`@vision-lens/cli`,
