@@ -159,13 +159,22 @@ def test_the_record_carries_the_fingerprint_and_the_whole_recipe() -> None:
     assert rebuilt.to_dict() == recipe.to_dict()
 
 
-def test_a_recipe_rebuilt_from_its_record_keeps_its_fingerprint() -> None:
+def test_a_record_without_an_address_is_refused() -> None:
+    """A recipe with no address is a recipe nobody can verify.
+
+    The other side refuses a record whose address is missing, and this side
+    refuses it too: a record the two sides judge differently is a record
+    that crosses the boundary by luck.
+    """
     recipe = resolve_tracked()
     record = recipe.to_record()
     record["fingerprint"] = ""
 
-    rebuilt = recipe_from_record(record)
-    assert rebuilt.fingerprint == recipe.fingerprint
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+    assert failure.value.field == "fingerprint"
 
 
 def test_a_numeric_weight_survives_the_round_trip_through_the_wire_form() -> None:
@@ -426,6 +435,74 @@ def test_a_model_whose_usage_restrictions_are_empty_is_pinned(
     recipe = resolve_tracked(registry_path=registry)
 
     assert recipe.encoder.usage_restrictions == ""
+
+
+def test_a_record_with_a_field_nobody_knows_is_refused() -> None:
+    """A field nobody knows is refused, not dropped.
+
+    The other side refuses a record with a field nobody knows, and a field
+    this side drops quietly is a field the two sides judge differently
+    without saying so.
+    """
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["gpuTier"] = "a100"
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_UNKNOWN_FIELD"
+    assert failure.value.field == "gpuTier"
+    assert "gpuTier" in failure.value.reason
+
+
+def test_a_run_without_epochs_is_refused() -> None:
+    """The other side refuses a ceiling of zero epochs, and so does this one."""
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(max_epochs=0)
+
+    assert failure.value.code == "RECIPE_EPOCHS_INVALID"
+    assert failure.value.field == "maxEpochs"
+
+
+def test_a_run_with_a_ceiling_of_a_fraction_is_refused() -> None:
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(max_epochs=1.5)
+
+    assert failure.value.code == "RECIPE_EPOCHS_INVALID"
+
+
+def test_a_run_without_checkpoints_is_refused() -> None:
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(checkpoint_interval=0)
+
+    assert failure.value.code == "RECIPE_CHECKPOINT_INTERVAL_INVALID"
+    assert failure.value.field == "checkpointInterval"
+
+
+def test_a_run_without_an_optimizer_is_refused() -> None:
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(optimizer="")
+
+    assert failure.value.code == "RECIPE_FIELD_INVALID"
+    assert failure.value.field == "optimizer"
+
+
+def test_a_run_with_an_empty_augmentation_is_refused() -> None:
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(augmentation=["flip", ""])
+
+    assert failure.value.code == "RECIPE_AUGMENTATION_INVALID"
+    assert failure.value.field == "augmentation.1"
+
+
+def test_a_seed_the_other_side_cannot_hold_exactly_is_refused() -> None:
+    """A seed above the safe range reaches the other side rounded."""
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(seed=9007199254740993)
+
+    assert failure.value.code == "RECIPE_SEED_INVALID"
+    assert failure.value.field == "seed"
 
 
 def test_a_class_without_a_documented_weight_is_refused() -> None:

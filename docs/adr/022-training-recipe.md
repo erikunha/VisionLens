@@ -142,6 +142,18 @@ of the tree recorded below.
      that refuses a model the platform is allowed to run. The check lives
      with the pin, so the resolver and the reader judge the same field the
      same way.
+   - the recipe refuses what the schema of the other side refuses: a ceiling
+     of epochs that is not a whole number above zero, a checkpoint interval
+     that is not, a seed outside the range the other side holds exactly, an
+     optimizer without a name, an augmentation without a name. The rules
+     live here as well, because a recipe the other side refuses is a recipe
+     that never reaches a trainer, and the values are checked as they are
+     and never coerced: a value this side rounds into the shape the other
+     side accepts is a value the two sides judge differently.
+   - the recipe refuses a RECORD with a field nobody knows, and it refuses a
+     record with no address. The other side refuses both, and a field this
+     side drops quietly is a field the two sides judge differently without
+     saying so.
 6. The ontology version is the digest of the CLASS SPACE: the sorted label
    keys of the ontology, which the probe answers with. It is not the digest
    of the taxonomy prose: the prose is the concern of the prompt of the

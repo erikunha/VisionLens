@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
@@ -86,6 +87,7 @@ RECIPE_FIELDS: Tuple[str, ...] = (
     "resources",
     "budget",
     "contractsVersion",
+    "fingerprint",
 )
 
 #: The fields the encoder pin carries, and nothing else.
@@ -130,6 +132,14 @@ DATASET_PIN_FIELDS: Tuple[str, ...] = (
 
 #: The partitions a recipe names.
 PARTITION_NAMES: Tuple[str, ...] = ("train", "val", "test")
+
+#: The largest integer the other side holds exactly. JavaScript keeps every
+#: number as a double, so a whole number above this range reaches the other
+#: side rounded, and the schema of the other side refuses it.
+MAX_SAFE_INTEGER = 9007199254740991
+
+#: The shape of the address of a recipe: the form of the repository.
+FINGERPRINT_PATTERN = re.compile(r"^fp2:[0-9a-f]{16}$")
 
 
 class RecipeError(Exception):
@@ -230,7 +240,7 @@ class TrainRecipe:
     dataset: DatasetPin
     partitions: Mapping[str, Tuple[str, ...]]
     ontology_version: str
-    class_weights: Mapping[str, str]
+    class_weights: Mapping[str, Any]
     estimator: str
     optimizer: str
     hyperparameters: Mapping[str, Any]
@@ -508,6 +518,76 @@ def _label_keys_of(split: Mapping[str, Any]) -> Tuple[str, ...]:
     return tuple(sorted(set(keys)))
 
 
+def _checked_run(recipe: TrainRecipe) -> TrainRecipe:
+    """The recipe, checked against the rules the other side enforces.
+
+    The schema of the other side is strict, and a recipe the other side
+    refuses is a recipe that never reaches a trainer. The rules live here
+    as well, so the resolver and the reader judge a configuration the same
+    way and the two sides refuse the same recipes.
+
+    The values are checked as they are, never coerced: a value the other
+    side refuses must be refused here too, and a value this side rounds
+    into the shape the other side accepts is a value the two sides judge
+    differently.
+    """
+    _require(
+        isinstance(recipe.max_epochs, int)
+        and not isinstance(recipe.max_epochs, bool)
+        and recipe.max_epochs > 0,
+        "RECIPE_EPOCHS_INVALID",
+        "maxEpochs",
+        f"the ceiling of the epochs is a whole number above zero, got "
+        f"{recipe.max_epochs!r}",
+    )
+    _require(
+        isinstance(recipe.checkpoint_interval, int)
+        and not isinstance(recipe.checkpoint_interval, bool)
+        and recipe.checkpoint_interval > 0,
+        "RECIPE_CHECKPOINT_INTERVAL_INVALID",
+        "checkpointInterval",
+        f"the interval of the checkpoints is a whole number above zero, got "
+        f"{recipe.checkpoint_interval!r}",
+    )
+    _require(
+        isinstance(recipe.seed, int)
+        and not isinstance(recipe.seed, bool)
+        and abs(recipe.seed) <= MAX_SAFE_INTEGER,
+        "RECIPE_SEED_INVALID",
+        "seed",
+        f"the seed is a whole number the other side holds exactly, between "
+        f"{-MAX_SAFE_INTEGER} and {MAX_SAFE_INTEGER}, got {recipe.seed!r}",
+    )
+    for name, value in (
+        ("estimator", recipe.estimator),
+        ("optimizer", recipe.optimizer),
+        ("devicePolicy", recipe.device_policy),
+        ("contractsVersion", recipe.contracts_version),
+    ):
+        _require(
+            isinstance(value, str) and value != "",
+            "RECIPE_FIELD_INVALID",
+            name,
+            f"the field names the decision of the run and may not be empty, got {value!r}",
+        )
+    _require(
+        isinstance(recipe.ontology_version, str)
+        and FINGERPRINT_PATTERN.match(recipe.ontology_version) is not None,
+        "RECIPE_FIELD_INVALID",
+        "ontologyVersion",
+        f"the version of the ontology is the address of the class space, got "
+        f"{recipe.ontology_version!r}",
+    )
+    for index, name in enumerate(recipe.augmentation):
+        _require(
+            isinstance(name, str) and name != "",
+            "RECIPE_AUGMENTATION_INVALID",
+            f"augmentation.{index}",
+            f"an augmentation names a pipeline of the run, got {name!r}",
+        )
+    return recipe
+
+
 def _checked_weight(label_key: str, value: Any) -> Any:
     """The weight of one class, checked and in the form the wire carries.
 
@@ -666,24 +746,26 @@ def resolve_recipe(
         "does not have is a split whose snapshot is a name",
     )
 
-    recipe = TrainRecipe(
-        encoder=encoder,
-        dataset=dataset,
-        partitions=partitions,
-        ontology_version=ontology_version_of(label_keys),
-        class_weights=weights,
-        estimator=M0_ESTIMATOR,
-        optimizer=optimizer,
-        hyperparameters=dict(hyperparameters),
-        seed=seed,
-        device_policy=device_policy,
-        augmentation=tuple(augmentation),
-        max_epochs=max_epochs,
-        early_stopping=dict(early_stopping or {}),
-        checkpoint_interval=checkpoint_interval,
-        resources=dict(resources or {}),
-        budget=dict(budget or {}),
-        contracts_version=contracts_version,
+    recipe = _checked_run(
+        TrainRecipe(
+            encoder=encoder,
+            dataset=dataset,
+            partitions=partitions,
+            ontology_version=ontology_version_of(label_keys),
+            class_weights=weights,
+            estimator=M0_ESTIMATOR,
+            optimizer=optimizer,
+            hyperparameters=dict(hyperparameters),
+            seed=seed,
+            device_policy=device_policy,
+            augmentation=tuple(augmentation),
+            max_epochs=max_epochs,
+            early_stopping=dict(early_stopping or {}),
+            checkpoint_interval=checkpoint_interval,
+            resources=dict(resources or {}),
+            budget=dict(budget or {}),
+            contracts_version=contracts_version,
+        )
     )
     fingerprint = recipe_fingerprint(recipe)
     return TrainRecipe(**{**recipe.__dict__, "fingerprint": fingerprint})
@@ -712,6 +794,17 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
             "RECIPE_RECORD_INVALID",
             name,
             "the recipe record carries no such field",
+        )
+    unknown = sorted(set(record) - set(RECIPE_FIELDS))
+    if unknown:
+        # The other side refuses a recipe with a field nobody knows, and a
+        # field this side drops quietly is a field the two sides judge
+        # differently without saying so.
+        raise RecipeError(
+            "RECIPE_RECORD_UNKNOWN_FIELD",
+            unknown[0],
+            f"the recipe record carries fields nobody knows: {', '.join(unknown)}; a "
+            "recipe with a field nobody maintains is a recipe nobody maintains",
         )
     encoder = _checked_pin(
         EncoderPin(
@@ -751,40 +844,48 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
         name: tuple(str(item) for item in ids)
         for name, ids in record["partitions"].items()
     }
-    recipe = TrainRecipe(
-        encoder=encoder,
-        dataset=dataset,
-        partitions=partitions,
-        ontology_version=str(record["ontologyVersion"]),
-        class_weights={
-            str(label_key): _checked_weight(str(label_key), value)
-            for label_key, value in record["classWeights"].items()
-        },
-        estimator=str(record["estimator"]),
-        optimizer=str(record["optimizer"]),
-        hyperparameters=dict(record["hyperparameters"]),
-        seed=int(record["seed"]),
-        device_policy=str(record["devicePolicy"]),
-        augmentation=tuple(str(item) for item in record["augmentation"]),
-        max_epochs=int(record["maxEpochs"]),
-        early_stopping=dict(record["earlyStopping"]),
-        checkpoint_interval=int(record["checkpointInterval"]),
-        resources=dict(record["resources"]),
-        budget=dict(record["budget"]),
-        contracts_version=str(record["contractsVersion"]),
-        recipe_version=str(record["recipeVersion"]),
+    recipe = _checked_run(
+        TrainRecipe(
+            encoder=encoder,
+            dataset=dataset,
+            partitions=partitions,
+            ontology_version=record["ontologyVersion"],
+            class_weights={
+                str(label_key): _checked_weight(str(label_key), value)
+                for label_key, value in record["classWeights"].items()
+            },
+            estimator=record["estimator"],
+            optimizer=record["optimizer"],
+            hyperparameters=dict(record["hyperparameters"]),
+            seed=record["seed"],
+            device_policy=record["devicePolicy"],
+            augmentation=tuple(record["augmentation"]),
+            max_epochs=record["maxEpochs"],
+            early_stopping=dict(record["earlyStopping"]),
+            checkpoint_interval=record["checkpointInterval"],
+            resources=dict(record["resources"]),
+            budget=dict(record["budget"]),
+            contracts_version=record["contractsVersion"],
+            recipe_version=record["recipeVersion"],
+        )
     )
     computed = recipe_fingerprint(recipe)
-    declared = str(record.get("fingerprint", ""))
-    if declared:
-        _require(
-            declared == computed,
-            "RECIPE_FINGERPRINT_MISMATCH",
-            "fingerprint",
-            f"the record declares the address {declared} and its own body digests to "
-            f"{computed}; a record that claims one configuration and hashes another is "
-            "a record nobody can reproduce",
-        )
+    declared = str(record["fingerprint"])
+    _require(
+        FINGERPRINT_PATTERN.match(declared) is not None,
+        "RECIPE_RECORD_INVALID",
+        "fingerprint",
+        f"the recipe record carries no address, and a recipe nobody can verify is a "
+        f"recipe nobody can reproduce; got {declared!r}",
+    )
+    _require(
+        declared == computed,
+        "RECIPE_FINGERPRINT_MISMATCH",
+        "fingerprint",
+        f"the record declares the address {declared} and its own body digests to "
+        f"{computed}; a record that claims one configuration and hashes another is "
+        "a record nobody can reproduce",
+    )
     return TrainRecipe(**{**recipe.__dict__, "fingerprint": computed})
 
 
