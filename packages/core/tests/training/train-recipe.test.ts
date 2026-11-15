@@ -113,6 +113,19 @@ describe('the recipe of a training run', () => {
     expect(outcome.issues.join(' ')).toContain('classWeights');
   });
 
+  it('refuses a class weight written as the text of a number', () => {
+    // The Python side publishes a weight as a NUMBER or as the word 'none',
+    // and a weight that arrived as the text of a number is a weight the two
+    // sides read differently.
+    const recipe = { ...validRecipe(), classWeights: { normal: '2.0' } };
+
+    const outcome = validateTrainRecipe(recipe);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) throw new Error('the recipe should have been refused');
+    expect(outcome.issues.join(' ')).toContain('classWeights');
+  });
+
   it('accepts a class weight that is none, which is a documented weight', () => {
     const recipe = { ...validRecipe(), classWeights: { normal: 'none' } };
 

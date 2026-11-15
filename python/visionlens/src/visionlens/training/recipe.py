@@ -415,14 +415,14 @@ def _label_keys_of(split: Mapping[str, Any]) -> Tuple[str, ...]:
 
 def _class_weights_of(
     class_weights: Mapping[str, Any], label_keys: Sequence[str]
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """The documented class weights of every class of the ontology.
 
     A class weight may be `none`, which means the class is not weighted,
     but it has to be DOCUMENTED: an undocumented weight is a weight nobody
     chose, and the recipe cannot tell it apart from a forgotten one.
     """
-    weights: Dict[str, str] = {}
+    weights: Dict[str, Any] = {}
     for label_key in label_keys:
         if label_key not in class_weights:
             raise RecipeError(
@@ -453,7 +453,11 @@ def _class_weights_of(
             f"classWeights.{label_key}",
             "a class weight may not be negative",
         )
-        weights[label_key] = repr(float(value))
+        # The weight stays a NUMBER, and it stays the number it was: the schema
+        # of the other side accepts a number or the word 'none', and a weight
+        # written as the text of a number is a weight the other side has to
+        # read as a string.
+        weights[label_key] = value if isinstance(value, int) else float(value)
     unknown = sorted(set(class_weights) - set(label_keys))
     if unknown:
         raise RecipeError(

@@ -264,6 +264,24 @@ def test_a_weight_that_is_neither_a_number_nor_none_is_refused() -> None:
     assert failure.value.code == "RECIPE_CLASS_WEIGHT_INVALID"
 
 
+def test_a_numeric_weight_is_published_as_a_number() -> None:
+    """A weight the run chose is a number, not the text of a number.
+
+    The other side accepts a number or the word 'none', so a weight written
+    as the text of a number is a weight the other side has to refuse.
+    """
+    weights = default_class_weights(label_keys_of_split())
+    chosen = sorted(weights)[0]
+    weights[chosen] = 2
+
+    recipe = resolve_tracked(class_weights=weights)
+
+    published = recipe.to_record()["classWeights"]
+    assert published[chosen] == 2
+    assert isinstance(published[chosen], (int, float))
+    assert not isinstance(published[chosen], str)
+
+
 def test_a_device_the_record_does_not_support_is_refused() -> None:
     with pytest.raises(RecipeError) as failure:
         resolve_tracked(device_policy="cuda")
