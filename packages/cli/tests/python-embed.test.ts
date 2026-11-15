@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  formatPythonEmbedOutput,
   formatPythonEmbedSummary,
   parseAssetFlags,
 } from '../src/commands/python-embed.js';
@@ -56,6 +57,52 @@ describe('the python embed command', () => {
     expect(lines.join('\n')).toContain('embedding run:   run-0001');
     expect(lines.join('\n')).toContain('artifact:        artifacts/embedding/run-0001');
     expect(lines.join('\n')).toContain('artifact row:    not written (no --db)');
+  });
+
+  it('prints nothing at all when the format is none', () => {
+    // The help of the command promises the format, so the format has to be
+    // real: a command that was asked for no output prints no output.
+    const output = formatPythonEmbedOutput(
+      {
+        embeddingRunId: 'run-0001',
+        count: 2,
+        dimensions: 3,
+        dtype: 'float32',
+        artifact: {
+          relativePath: 'artifacts/embedding/run-0001',
+          sha256: 'a'.repeat(64),
+          bytes: 24,
+        },
+        transformFingerprint: 'fp2:0123456789abcdef',
+      },
+      { written: false, outputFormat: 'none' },
+    );
+    expect(output).toBeNull();
+  });
+
+  it('prints the json of the run when the format is json', () => {
+    const output = formatPythonEmbedOutput(
+      {
+        embeddingRunId: 'run-0001',
+        count: 2,
+        dimensions: 3,
+        dtype: 'float32',
+        artifact: {
+          relativePath: 'artifacts/embedding/run-0001',
+          sha256: 'a'.repeat(64),
+          bytes: 24,
+        },
+        transformFingerprint: 'fp2:0123456789abcdef',
+      },
+      { written: false, outputFormat: 'json' },
+    );
+    expect(output).not.toBeNull();
+    expect(JSON.parse(output ?? '{}')).toMatchObject({
+      embeddingRunId: 'run-0001',
+      count: 2,
+      dimensions: 3,
+      dtype: 'float32',
+    });
   });
 });
 

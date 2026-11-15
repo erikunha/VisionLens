@@ -121,6 +121,33 @@ export function formatPythonEmbedSummary(outcome: {
 }
 
 /**
+ * What the command prints for a successful run.
+ *
+ * The format decides what leaves the process: the summary the reader reads,
+ * the JSON a program reads, or NOTHING at all. The legacy commands know the
+ * format 'none', and it means the same thing here: the work happened and the
+ * caller asked for no output.
+ *
+ * The function returns null when the command has to print nothing, so the
+ * decision is a value a test can read and not a branch nobody can reach.
+ */
+export function formatPythonEmbedOutput(
+  result: {
+    readonly embeddingRunId: string;
+    readonly count: number;
+    readonly dimensions: number;
+    readonly dtype: string;
+    readonly artifact: { readonly relativePath: string; readonly sha256: string; readonly bytes: number };
+    readonly transformFingerprint: string;
+  },
+  options: { readonly written: boolean; readonly outputFormat?: string },
+): string | null {
+  if (options.outputFormat === 'none') return null;
+  if (options.outputFormat === 'json') return JSON.stringify(result, null, 2);
+  return formatPythonEmbedSummary(result, { written: options.written }).join('\n');
+}
+
+/**
  * Runs the command and answers the exit code of the process.
  *
  * The exit codes of the facade are its own: 0 for a success, 2 for a
@@ -160,15 +187,11 @@ export async function runPythonEmbed(options: PythonEmbedCommandOptions): Promis
       return outcome.error.exitCode;
     }
 
-    if (options.outputFormat === 'json') {
-      console.log(JSON.stringify(outcome.result, null, 2));
-      return 0;
-    }
-    for (const line of formatPythonEmbedSummary(outcome.result, {
+    const output = formatPythonEmbedOutput(outcome.result, {
       written: options.dbPath !== undefined,
-    })) {
-      console.log(line);
-    }
+      ...(options.outputFormat === undefined ? {} : { outputFormat: options.outputFormat }),
+    });
+    if (output !== null) console.log(output);
     return 0;
   } finally {
     store?.close();
