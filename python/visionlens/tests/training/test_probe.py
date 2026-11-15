@@ -720,3 +720,25 @@ def test_a_manifest_nobody_can_read_is_not_overwritten(tmp_path: Path) -> None:
 
     assert failure.value.code == "CHECKPOINT_MANIFEST_CONFLICT"
     assert manifest_path.read_text(encoding="utf-8") == "{ not json"
+
+
+
+
+def test_a_class_weight_of_zero_is_refused() -> None:
+    """A weight of zero would drop the class from the fit."""
+    recipe = tiny_recipe()
+    class_map = class_map_from_recipe(recipe)
+
+    with pytest.raises(ProbeError) as failure:
+        fit_probe(
+            features=TINY_FEATURES,
+            labels=TINY_LABELS,
+            class_map=class_map,
+            seed=recipe.seed,
+            hyperparameters=recipe.hyperparameters,
+            solver=recipe.optimizer,
+            max_epochs=recipe.max_epochs,
+            class_weights={NORMAL: 0.0, DEFECT: NO_WEIGHT},
+        )
+
+    assert failure.value.code == "PROBE_CLASS_WEIGHT_INVALID"

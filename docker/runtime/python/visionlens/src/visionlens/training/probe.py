@@ -621,6 +621,14 @@ def _effective_weights(
                 f"classWeights.{label_key}",
                 f"a class weight may not be negative, got {value!r}",
             )
+        if value == 0:
+            raise ProbeError(
+                "PROBE_CLASS_WEIGHT_INVALID",
+                f"classWeights.{label_key}",
+                f"a class weight of zero drops the class from the fit, and a dropped class "
+                f"is a class the run never reports; document the class as '{NO_WEIGHT}' "
+                "instead",
+            )
         documented[label_key] = value if isinstance(value, int) else float(value)
     unknown = sorted(set(weights) - set(class_map.label_keys))
     if unknown:
