@@ -232,6 +232,88 @@ shipped, with the decision recorded in `docs/adr/021-python-worker-facade.md`.
 
 ---
 
+## Phase map (Phase II extension: the computer vision capability packs)
+
+The canonical package delivered 2026-11-11 is integrated verbatim under `docs/vnext/`
+(64 tracked files, `docs/vnext/MANIFEST.sha256` validated). A second delivery of 2026-11-15
+adds the drop-in handoff of the canonical agent (`docs/vnext/AGENTS-HANDOFF.md`, also appended
+to `docs/vnext/VISIONLENS_FULL_SPEC.md`) and the Phase II extension
+`docs/vnext/extensions/computer-vision-2027/` (19 files, `MANIFEST-PHASE-II.sha256` validated).
+The canonical manifest is unchanged by the extension: the pack covers its own files and the
+extension covers its own.
+
+**The extension is a PROPOSAL, and it says so in its own first line.** It does not represent
+implemented features, open pull requests or executed tests. Nothing of it is shipped, and no
+ticket of it is in the canonical backlog. What it brings is SCOPE, an ORDER and a DISCIPLINE:
+eight computer vision labs, five waves, 33 new tickets (`VLCV-*`, ids that do not collide with
+the `VLN-*` of the canonical backlog) and a scientific standard (the metric per task, the
+mandatory error slices, the unit of the split, the promotion gate) that the canonical pack
+already asked for and that this repository is still building toward.
+
+The reconciliation of the 33 tickets against the live tree is in
+`docs/migration/visionlens-phase-ii-reconciliation.md`, and the first ticket of the extension
+IS that reconciliation: `VLCV-001`.
+
+### The waves
+
+| Wave | Depends on | Labs | What must be true to advance |
+|---|---|---|---|
+| CV0 preparation | R0, R1, R2 | foundation | the baseline of the repository is preserved, the licence of the data is reviewed by a human, and one golden output exists |
+| CV1 multi-capability demo | R3, R4 (subset) | 09 classification, 14 similarity, 15 matting | three tasks over the SAME dataset, with quality, latency and errors, reproducible, and a real decision between two methods |
+| CV2 geometry | annotation boxes, the adapter and the evaluator | 10 detection, 13 PPE (research) | AP and critical recall over real classes, with the licence of every weight and every datum verified |
+| CV3 time and text | video ingest and the temporal contract, OCR | 12 counting, 11 ALPR | an offline clip, the invariants of the temporal ids, an audit trail and a consented demo |
+| CV4 gated frontier | R5 to R8 (subset) and approvals | 16 chest X-ray (research), grounding, documents | research-only gates, an external domain validated, licences and measurements |
+
+The waves are not dates. The extension says that every new family can be postponed while
+R0 to R4 are not stable, and the order is by value and not by the numbering of the labs:
+09, 14
+and 15 first, then 10 and 13, then 12, and 11 and 16 stay controlled research laboratories.
+
+### The eight labs
+
+| Lab | Pack | Priority | Dataset and its licence | Primary metrics |
+|---|---|---|---|---|
+| 09 | Transfer Learning (PyTorch) | P0 | Oxford-IIIT Pet, a candidate and not attached | macro-F1, ECE, balanced accuracy |
+| 10 | Object detection (YOLO and RT-DETR) | P1 | Open Images V7 by sample, the licence verified per image | COCO AP@[.50:.95], AP_small, p95 |
+| 11 | ALPR and OCR | P3, research | UFPR-ALPR, academic and non commercial, no redistribution | exact plate match, CER, end-to-end recall |
+| 12 | Video counting | P2 | a clip with authorization, MOT17 only after the terms review | count MAE, event P/R, HOTA and IDF1 |
+| 13 | PPE | P2, research | SHWD as a candidate, the rights of every image to review | critical recall, false alert rate, abstention |
+| 14 | Visual similarity | P0 | Oxford Pets with annotated relevance pairs | Recall@k, mAP@k, nDCG, p95 |
+| 15 | Background removal | P1 | P3M-10k (MIT), DIS5K non commercial and no redistribution | mIoU, boundary F1, SAD, latency |
+| 16 | Chest X-ray | P4, research only | CheXpert and VinDr-CXR under a research agreement | AUROC and AUPRC per pathology, ECE, shift |
+
+**Lab 09 is where PyTorch enters the training path.** The M0 rung of the canonical ladder is a
+scikit-learn logistic regression over frozen vectors, and that is what this repository ships
+today (spec 023, the pinned recipe, the probe and the digest-pinned checkpoint). The trainable
+head and the fine tuning of lab 09 are the M1 and the M2 rungs
+(`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:6`, `:7`), which the canonical pack declares as
+the later rungs and not as this ticket. The labs of lab 09 are therefore not a contradiction of
+the work in flight: they are the same ladder, two rungs above.
+
+### The scientific standard the extension adds
+
+The extension does not only add scope. It fixes the standard that the canonical pack asks for
+and that this repository still has to build:
+
+- the metric is per TASK and there is no universal score: macro-F1 and ECE for classification,
+  AP and critical recall for detection, CER for OCR, count MAE and HOTA for tracking, Recall@k
+  for retrieval, mIoU and SAD for matting, AUROC and AUPRC for the research labs;
+- the SPLIT UNIT is the real dependency unit: by patient in a radiograph, by vehicle and by
+  sequence in a plate, by recording and by camera in a video, by perceptual duplicate group in
+  an image set. When there is no valid metadata, the test is declared INCONCLUSIVE and no
+  holdout is fabricated;
+- the FAILURE SLICES are mandatory: rare class, blur, occlusion, lighting, camera, domain,
+  patient, short text;
+- the failures of inference, the OOM, the timeout, the dropped frames and the unreadable files
+  stay in the denominator;
+- the SCORE of the model, the CALIBRATED confidence, the heuristic threshold, the UNCERTAINTY
+  and the quality measured on the benchmark are five different things and are never mixed;
+- the PROMOTION is per task and the threshold is defined BEFORE the test;
+- the claims that are forbidden: "YOLO acerta 99%", "X-ray diagnostica", "SAM3 roda em MPS",
+  and any benchmark that was never executed.
+
+---
+
 ## What we are not building (current)
 
 | Item | Reason |
@@ -239,8 +321,13 @@ shipped, with the decision recorded in `docs/adr/021-python-worker-facade.md`.
 | Owned foundation models | Adapt, evaluate and operate existing ones (constitution governance) |
 | Multi-user / SaaS / RBAC | Single-user local-first; revisit with validated demand (vision monetization hypotheses) |
 | Distributed/multi-GPU training | One MPS device; CUDA only via optional adapters (ADR-007) |
-| Medical imaging vertical | Validation/regulatory burden out of scope for now |
+| Medical imaging vertical | Validation/regulatory burden out of scope for now; the chest X-ray lab of the Phase II extension is research only and never a clinical claim |
 | Local planning material in git | Planning stays local (ADR-020); ADRs + this roadmap are the tracked record |
+| Live video, continuous camera and public stream | The first release of the video lab is an offline clip with a retention policy; no camera, no stream |
+| Identification of people across clips | Counting is ephemeral and clip scoped; no biometrics, no persistent identity, no cross-video linkage |
+| Automatic inspection or enforcement automation | The PPE lab produces visible evidence for a human review; it is never a safety control |
+| Automatic deletion of duplicated assets | The visual similarity lab detects near duplicates; it never deletes |
+| A second contract language or a competing schema | The Zod schemas of `packages/contracts` own the public entities; a proposed capability pack is a proposal until an ADR says otherwise |
 
 ## Metrics that matter (Vision Lens additions)
 
