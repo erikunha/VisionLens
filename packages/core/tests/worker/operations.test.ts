@@ -497,6 +497,44 @@ describe('the recorded shape of the vision.embed bridge', () => {
     }
   });
 
+  it('refuses a request that names both shapes on the recorded entry point too', async () => {
+    // Every entry point of the operation refuses an ambiguous request the
+    // same way, and not only the builder of the params.
+    await expect(
+      runRecordedVisionEmbed(stubClient(RECORDED_PAYLOAD), {
+        ...recordedInput(),
+        images: ['asset-a'],
+      } as never),
+    ).rejects.toThrowError(WorkerOperationContractError);
+    await expect(
+      tryRecordedVisionEmbed(stubClient(RECORDED_PAYLOAD), {
+        ...recordedInput(),
+        images: ['asset-a'],
+      } as never),
+    ).rejects.toThrowError(WorkerOperationContractError);
+  });
+
+  it('refuses a recorded input with no assets at all, and not with a crash', async () => {
+    // A caller that is not TypeScript may hand an input with no assets.
+    // The refusal is a CONTRACT refusal: a request that can never
+    // succeed is not a failure worth retrying.
+    try {
+      VISION_EMBED_BRIDGE.buildParams({
+        ...recordedInput(),
+        assets: undefined,
+      } as never);
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('assets');
+    }
+    await expect(
+      tryRecordedVisionEmbed(stubClient(RECORDED_PAYLOAD), {
+        ...recordedInput(),
+        assets: undefined,
+      } as never),
+    ).rejects.toThrowError(WorkerOperationContractError);
+  });
+
   it('refuses a recorded request with no asset at all', () => {
     try {
       VISION_EMBED_BRIDGE.buildParams(recordedInput({ assets: [] }));

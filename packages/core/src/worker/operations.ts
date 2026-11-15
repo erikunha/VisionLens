@@ -583,6 +583,17 @@ function isRecordedEmbedInput(
 export function buildRecordedVisionEmbedParams(
   input: RecordedVisionEmbedInput,
 ): Record<string, unknown> {
+  if (!Array.isArray(input.assets)) {
+    // A caller that is not TypeScript may hand an input with no assets
+    // at all. The refusal names the field, and it is a CONTRACT refusal
+    // and not a crash of the worker: a request that can never succeed
+    // is not a failure worth retrying.
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'assets',
+      'the operation vision.embed needs the assets of a recorded run, and the request carried none',
+    );
+  }
   if (input.assets.length === 0) {
     throw new WorkerOperationContractError(
       VISION_EMBED_OPERATION,
@@ -590,7 +601,7 @@ export function buildRecordedVisionEmbedParams(
       'the operation vision.embed needs at least one asset, and the request carried none',
     );
   }
-  if (input.snapshotId.length === 0) {
+  if (typeof input.snapshotId !== 'string' || input.snapshotId.length === 0) {
     throw new WorkerOperationContractError(
       VISION_EMBED_OPERATION,
       'snapshotId',
@@ -598,14 +609,14 @@ export function buildRecordedVisionEmbedParams(
     );
   }
   const assets = input.assets.map((asset, index) => {
-    if (asset.assetId.length === 0) {
+    if (typeof asset?.assetId !== 'string' || asset.assetId.length === 0) {
       throw new WorkerOperationContractError(
         VISION_EMBED_OPERATION,
         `assets[${index}].assetId`,
         'an asset of vision.embed carries no assetId',
       );
     }
-    if (asset.path.length === 0) {
+    if (typeof asset?.path !== 'string' || asset.path.length === 0) {
       throw new WorkerOperationContractError(
         VISION_EMBED_OPERATION,
         `assets[${index}].path`,
@@ -733,7 +744,11 @@ export async function runRecordedVisionEmbed(
     ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
     operation: VISION_EMBED_BRIDGE.operation,
     workspaceId: input.workspaceId,
-    params: buildRecordedVisionEmbedParams(input),
+    // The params are built by the BRIDGE and not by the builder of the
+    // recorded shape alone: the bridge refuses a request that names both
+    // shapes, and every entry point of the operation refuses it the same
+    // way.
+    params: VISION_EMBED_BRIDGE.buildParams(input),
     budget: input.budget,
   });
   return parseRecordedVisionEmbedSuccess(outcome.result);
