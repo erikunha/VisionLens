@@ -1,18 +1,25 @@
 """The trainer of the M0 rung: the loop, the curves, the device and the read.
 
 The trainer trains on the `train` partition ONLY and it selects on the `val`
-partition ONLY (`docs/vnext/13-EVALUATION-SCIENCE.md:11`, FR-003 of the
-ticket). The test partition is not read here: the selection code and the
-evaluation code are separate modules, and a module that can see both is a
-module that can leak (`specs/023-encoder-probe-training/plan.md`, "The
-selection code and the evaluation code are separate modules"). The run
-RECORDS the items it read, so the absence of a test read is observable and
-not a promise.
+partition ONLY (`docs/vnext/specs/VLN-009-encoder-probe-training.md:14`, "Train
+only on train split, tune via validation, lock test evaluation"; FR-003 of the
+local spec of the ticket). The test partition is not read here: the selection
+code and the evaluation code are separate modules, and the lock of the test
+partition belongs to the holdout evaluation, which does not exist yet. The
+run RECORDS the items it read, so the absence of a test read is observable
+and not a promise.
+
+The partition of the run is the partition the RECIPE pins. The recipe carries
+the ids of the three partitions, and the trainer refuses a run whose items are
+not exactly the ones it pins: a run over items nobody pinned is a run nobody
+can reproduce, and the pin is what makes the claim of a train-only run a
+property and not a convention.
 
 The features are NOT computed here: the trainer consumes the frozen artifact
 of the encoder and reuses it (`training/features.py`). A trainer that
 recomputed the vectors would train on a pipeline nobody pinned, and the
-vectors of the training and of the inference would not be the same vectors.
+vectors of the training and of the inference would not be the same vectors
+(FR-025 of the local spec of the ticket).
 
 The EARLY STOPPING is the M2 rung, not this one: the pack puts the early
 stopping criterion with the fine tuning and its schedulers
@@ -23,25 +30,27 @@ fine-tuning, no partial unfreezing, no SGD loop with early stopping"). A
 recipe that carries a criterion is therefore REFUSED with the reason, and
 never silently ignored: a decision nobody applied is not a decision.
 
-Four things are recorded, because the pack asks for them and a run that does
-not record them cannot be reproduced:
+What is recorded, because the pack asks for it and a run that does not record
+it cannot be reproduced:
 
-- the DEVICE the run used, the device the recipe asked for, and the reason
-  of the fallback when they are not the same. A run that quietly ran
-  somewhere else is a run nobody can reproduce
-  (`docs/vnext/adrs/ADR-017-local-first-hardware.md:12`). The CPU is the
-  reference device, and an explicit device this build does not admit is
-  REFUSED with the reason, never substituted.
+- the DEVICE the run used, the reason of its resolution and the reason of
+  the fallback. The device planner of the platform is the only resolver, so
+  the run and the capability report cannot answer in two different ways, and
+  an explicit device this build does not admit is REFUSED with the reason,
+  never substituted (`docs/vnext/adrs/ADR-017-local-first-hardware.md:12`).
 - the CURVE of the run: the accuracy of the train and of the validation
   partition at every epoch. The curve of the M0 rung is flat, and that is a
   property of the rung and not a defect of the measurement: a logistic
   regression over frozen vectors converges at once.
 - the CHECKPOINTS: one every interval of epochs, each one addressed by its
   own digest.
-- the READ of the model: the cold read (the first prediction of the run)
-  and the warm read (the median of the rest) are reported SEPARATELY,
+- the READ of the model: the cold read (the first prediction of the run) and
+  the warm read (the percentiles of the rest) are reported SEPARATELY,
   because a number that averages the two is a number nobody can use
   (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
+- the THROUGHPUT of the fit and the PEAK MEMORY of the process, so the run
+  carries the numbers the hardware matrix asks for (FR-015 and FR-016 of the
+  local spec of the ticket).
 """
 
 from __future__ import annotations
@@ -51,7 +60,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
-from ..runtime.device import ADMITTED_DEVICES
+from ..errors import UnsupportedDeviceError
+from ..inference.artifact import latency_percentiles, peak_memory_bytes
+from ..runtime.device import DevicePlanner
 from .checkpoint import write_checkpoint
 from .features import FeatureSet, load_features
 from .probe import ProbeModel, fit_probe_from_recipe
@@ -59,6 +70,9 @@ from .recipe import TrainRecipe, label_key_of, recipe_fingerprint
 
 #: The partitions the trainer reads. The test partition is NOT one of them.
 SELECTION_PARTITIONS: Tuple[str, ...] = ("train", "val")
+
+#: The partitions the recipe pins.
+PARTITION_NAMES: Tuple[str, ...] = ("train", "val", "test")
 
 
 class TrainerError(Exception):
@@ -102,14 +116,18 @@ class TrainingRun:
     recipe_fingerprint: str
     device: str
     requested_device: str
+    device_reason: str
     fallback_reason: str
-    feature_digest: str
+    feature_digests: Tuple[str, ...]
     curve: Tuple[EpochPoint, ...]
     checkpoints: Tuple[str, ...]
     final_checkpoint: str
     read_items: Tuple[str, ...]
+    throughput_per_second: float
     cold_read_ms: float
     warm_read_p50_ms: float
+    warm_read_p95_ms: float
+    peak_memory_bytes: Any
 
     def to_dict(self) -> Dict[str, Any]:
         """The run as the wire form."""
@@ -117,8 +135,9 @@ class TrainingRun:
             "recipeFingerprint": self.recipe_fingerprint,
             "device": self.device,
             "requestedDevice": self.requested_device,
+            "deviceReason": self.device_reason,
             "fallbackReason": self.fallback_reason,
-            "featureDigest": self.feature_digest,
+            "featureDigests": list(self.feature_digests),
             "curve": [
                 {
                     "epoch": point.epoch,
@@ -130,8 +149,11 @@ class TrainingRun:
             "checkpoints": list(self.checkpoints),
             "finalCheckpoint": self.final_checkpoint,
             "readItems": list(self.read_items),
+            "throughputPerSecond": self.throughput_per_second,
             "coldReadMs": self.cold_read_ms,
             "warmReadP50Ms": self.warm_read_p50_ms,
+            "warmReadP95Ms": self.warm_read_p95_ms,
+            "peakMemoryBytes": self.peak_memory_bytes,
         }
 
 
@@ -185,29 +207,26 @@ def split_items_of(assignments: Sequence[Mapping[str, Any]]) -> Tuple[SplitItem,
     return tuple(items)
 
 
-def _device_of(policy: str) -> Tuple[str, str]:
-    """The device the run uses, and the reason of the fallback.
+def _device_of(policy: str) -> Tuple[str, str, str]:
+    """The device of the run, the reason of the resolution and the fallback.
 
-    An explicit device this build does not admit is REFUSED with the
-    reason: a silent substitution is forbidden
-    (`docs/vnext/adrs/ADR-017-local-first-hardware.md:12`).
+    The planner of the platform is the only resolver: the report of the
+    capabilities and the run ask the same question, so they cannot answer
+    it in two different ways. An explicit device this build does not admit
+    is REFUSED with the reason, because a run that ran somewhere else is a
+    run nobody can reproduce.
 
     @raises TrainerError when the device is not admitted.
     """
-    if policy == "auto":
-        return (
-            ADMITTED_DEVICES[0],
-            f"auto resolves to the first admitted device, '{ADMITTED_DEVICES[0]}'",
-        )
-    if policy in ADMITTED_DEVICES:
-        return policy, ""
-    raise TrainerError(
-        "TRAINER_DEVICE_UNSUPPORTED",
-        "devicePolicy",
-        f"the device '{policy}' is not admitted by this build, and a run that ran "
-        f"somewhere else is a run nobody can reproduce; the admitted devices are "
-        f"{', '.join(ADMITTED_DEVICES)}",
-    )
+    try:
+        plan = DevicePlanner().plan(policy)
+    except UnsupportedDeviceError as error:
+        raise TrainerError(
+            "TRAINER_DEVICE_UNSUPPORTED",
+            "devicePolicy",
+            str(error),
+        ) from error
+    return plan.device, plan.reason, plan.fallback_reason or ""
 
 
 def _no_early_stopping(criterion: Mapping[str, Any]) -> None:
@@ -245,24 +264,46 @@ def _accuracy_of(
     return correct / len(vectors)
 
 
-def _median(values: Sequence[float]) -> float:
-    """The median of a sequence of numbers."""
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    middle = len(ordered) // 2
-    if len(ordered) % 2 == 1:
-        return ordered[middle]
-    return (ordered[middle - 1] + ordered[middle]) / 2
+def _selected(
+    recipe: TrainRecipe, items: Sequence[SplitItem]
+) -> Tuple[List[SplitItem], List[SplitItem]]:
+    """The items of the train and of the validation partition, checked.
 
+    The partition of the run is the partition the RECIPE pins: the recipe
+    carries the ids of the three partitions, and the run refuses items that
+    the recipe does not pin. The check is what turns the claim of a
+    train-only run into a property of the run and not into a convention of
+    the caller.
 
-def _selected(items: Sequence[SplitItem]) -> Tuple[List[SplitItem], List[SplitItem]]:
-    """The items of the train and of the validation partition.
-
-    The test partition is not here: the trainer may not read it.
+    @raises TrainerError when the run carries items the recipe does not
+        pin, or an item of the test partition.
     """
     train = [item for item in items if item.partition == "train"]
     val = [item for item in items if item.partition == "val"]
+    for partition, selected in (("train", train), ("val", val)):
+        pinned = set(recipe.partitions.get(partition, ()))
+        carried = {item.item_id for item in selected}
+        if carried != pinned:
+            missing = len(pinned - carried)
+            extra = len(carried - pinned)
+            raise TrainerError(
+                "TRAINER_PARTITION_MISMATCH",
+                f"partitions.{partition}",
+                f"the recipe pins {len(pinned)} item(s) of the {partition} partition and "
+                f"the run carries {len(carried)} ({missing} not carried, {extra} not "
+                "pinned); a run over items nobody pinned is a run nobody can reproduce",
+            )
+    locked = set(recipe.partitions.get("test", ()))
+    leaked = [item.item_id for item in train + val if item.item_id in locked]
+    if leaked:
+        raise TrainerError(
+            "TRAINER_PARTITION_LEAK",
+            "partitions.test",
+            f"{len(leaked)} item(s) of the locked test partition were selected: "
+            f"{', '.join(leaked[:5])}; the selection code and the evaluation code are "
+            "separate modules, and a selection that reads the test partition is a "
+            "selection that leaks",
+        )
     return train, val
 
 
@@ -319,17 +360,18 @@ def train(
 
     The run trains on the `train` partition, it selects on the `val`
     partition, it publishes a checkpoint every interval of epochs, and it
-    records the device, the curve, the checkpoints and the read.
+    records the device, the curve, the checkpoints, the throughput and the
+    read.
 
     @raises TrainerError when the run cannot be trained.
     @raises FeatureError when the features cannot be used by the run.
     """
-    device, fallback_reason = _device_of(recipe.device_policy)
+    device, device_reason, fallback_reason = _device_of(recipe.device_policy)
     _no_early_stopping(recipe.early_stopping)
     fingerprint = _fingerprint_of(recipe)
     max_epochs, checkpoint_interval = _checked_epochs(recipe)
 
-    train_items, val_items = _selected(items)
+    train_items, val_items = _selected(recipe, items)
     if not train_items:
         raise TrainerError(
             "TRAINER_PARTITION_EMPTY",
@@ -372,9 +414,12 @@ def train(
     checkpoints: List[str] = []
     final_checkpoint = ""
     model: ProbeModel | None = None
+    fit_seconds = 0.0
 
     for epoch in range(1, max_epochs + 1):
+        started = time.perf_counter()
         model = fit_probe_from_recipe(recipe, train_vectors, train_labels)
+        fit_seconds += time.perf_counter() - started
         curve.append(
             EpochPoint(
                 epoch=epoch,
@@ -400,39 +445,44 @@ def train(
             "nobody can resume",
         )
 
-    cold_read, warm_read = _read_of(model, val_vectors)
+    cold_read, warm_p50, warm_p95 = _read_of(model, val_vectors)
+    throughput = len(train_items) / fit_seconds if fit_seconds > 0 else 0.0
 
     return TrainingRun(
         recipe_fingerprint=fingerprint,
         device=device,
         requested_device=recipe.device_policy,
+        device_reason=device_reason,
         fallback_reason=fallback_reason,
-        feature_digest=feature_set.artifact_digest,
+        feature_digests=feature_set.artifact_digests,
         curve=tuple(curve),
         checkpoints=tuple(checkpoints),
         final_checkpoint=final_checkpoint,
         read_items=tuple(item.item_id for item in selected),
+        throughput_per_second=throughput,
         cold_read_ms=cold_read,
-        warm_read_p50_ms=warm_read,
+        warm_read_p50_ms=warm_p50,
+        warm_read_p95_ms=warm_p95,
+        peak_memory_bytes=peak_memory_bytes(),
     )
 
 
 def _read_of(
     model: ProbeModel, vectors: Sequence[Sequence[float]]
-) -> Tuple[float, float]:
+) -> Tuple[float, float, float]:
     """The cold read and the warm read of the model, in milliseconds.
 
     The cold read is the FIRST prediction of the run and the warm read is
-    the median of the rest: the two are reported separately, because a
+    the percentiles of the rest: the two are reported separately, because a
     number that averages them is a number nobody can use.
     """
     if not vectors:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     timings: List[float] = []
     for vector in vectors:
         started = time.perf_counter()
         model.predict(vector)
         timings.append((time.perf_counter() - started) * 1000.0)
     cold = timings[0]
-    warm = _median(timings[1:]) if len(timings) > 1 else cold
-    return cold, warm
+    warm = latency_percentiles(timings[1:])
+    return cold, float(warm["p50Ms"]), float(warm["p95Ms"])

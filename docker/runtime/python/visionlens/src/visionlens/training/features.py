@@ -71,7 +71,7 @@ class FeatureSet:
     dimension: int
     revision: str
     preprocessing_fingerprint: str
-    artifact_digest: str
+    artifact_digests: Tuple[str, ...]
     missing: Tuple[str, ...] = ()
 
     def vector_of(self, item_id: str) -> Tuple[float, ...]:
@@ -108,7 +108,7 @@ def _read_artifacts(
     for directory in directories:
         try:
             artifacts.append(read_embedding_artifact(Path(directory)))
-        except (OSError, ValueError) as error:
+        except (OSError, TypeError, ValueError) as error:
             raise FeatureError(
                 "FEATURES_ARTIFACT_INVALID",
                 str(directory),
@@ -170,6 +170,23 @@ def _checked_identity(
     return revision, preprocessing
 
 
+def _pinned_dimension(recipe: TrainRecipe) -> int:
+    """The dimension the recipe pins.
+
+    @raises FeatureError when the recipe pins no dimension.
+    """
+    shape = recipe.encoder.output_shape
+    dimension = shape.get("dimension") if hasattr(shape, "get") else None
+    if not isinstance(dimension, int) or isinstance(dimension, bool) or dimension <= 0:
+        raise FeatureError(
+            "FEATURES_DIMENSION_UNPINNED",
+            "encoder.outputShape.dimension",
+            "the recipe pins no dimension of the vectors, and vectors of no dimension are "
+            "not comparable with anything",
+        )
+    return dimension
+
+
 def _vectors_of(artifact: EmbeddingArtifact) -> Tuple[Tuple[float, ...], ...]:
     """The vectors of an artifact, read from the bytes of the file.
 
@@ -208,13 +225,24 @@ def _vectors_of(artifact: EmbeddingArtifact) -> Tuple[Tuple[float, ...], ...]:
             f"the vectors file carries {len(values)} values and the manifest names "
             f"{manifest.count} vectors of {manifest.dimension} values",
         )
-    return tuple(
+    vectors = tuple(
         tuple(
             float(value)
             for value in values[index * manifest.dimension : (index + 1) * manifest.dimension]
         )
         for index in range(manifest.count)
     )
+    for index, vector in enumerate(vectors):
+        for position, value in enumerate(vector):
+            if value != value or value in (float("inf"), float("-inf")):
+                raise FeatureError(
+                    "FEATURES_VECTOR_NOT_FINITE",
+                    str(artifact.vectors_path),
+                    f"the vector {index} carries a value that is not a number at the "
+                    f"position {position}; a vector of NaN or of infinity is not a "
+                    "measurement",
+                )
+    return vectors
 
 
 def load_features(
@@ -269,14 +297,26 @@ def load_features(
             by_digest[digest] = vector
 
     dimension = artifacts[0].manifest.dimension
-    if dimension != recipe.encoder.output_shape["dimension"]:
-        raise FeatureError(
-            "FEATURES_DIMENSION_MISMATCH",
-            "encoder.outputShape.dimension",
-            f"the artifact of features carries vectors of {dimension} values and the recipe "
-            f"pins a dimension of {recipe.encoder.output_shape['dimension']}; vectors of two "
-            "dimensions are not comparable",
-        )
+    pinned = _pinned_dimension(recipe)
+    for artifact in artifacts:
+        carried = artifact.manifest.dimension
+        if carried != pinned:
+            raise FeatureError(
+                "FEATURES_DIMENSION_MISMATCH",
+                "encoder.outputShape.dimension",
+                f"the artifact of features carries vectors of {carried} values and the "
+                f"recipe pins a dimension of {pinned}; vectors of two dimensions are not "
+                "comparable",
+            )
+    for artifact in artifacts:
+        if artifact.manifest.dimension != dimension:
+            raise FeatureError(
+                "FEATURES_DIMENSION_MIXED",
+                "featureDirectories",
+                f"the artifacts of the run carry the dimensions {dimension} and "
+                f"{artifact.manifest.dimension}; vectors of two dimensions are not "
+                "comparable",
+            )
 
     item_ids: list[str] = []
     paired: list[Tuple[float, ...]] = []
@@ -304,7 +344,7 @@ def load_features(
         dimension=dimension,
         revision=revision,
         preprocessing_fingerprint=preprocessing,
-        artifact_digest=artifacts[0].artifact_digest,
+        artifact_digests=tuple(artifact.artifact_digest for artifact in artifacts),
         missing=tuple(missing),
     )
 
