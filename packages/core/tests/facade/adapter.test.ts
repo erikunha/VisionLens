@@ -12,6 +12,7 @@ import {
   WorkerLaunchError,
   WorkerProtocolError,
   type WorkerClient,
+  type WorkerRequestInput,
 } from '../../src/worker/index.js';
 
 /**
@@ -83,7 +84,7 @@ function fakeClient(options?: {
 }): { client: WorkerClient } {
   const client = {
     hello: hello(options?.supportedOperations ?? ['vision.embed']),
-    async request(input: { params: Record<string, unknown> }) {
+    async request(input: WorkerRequestInput) {
       options?.onRequest?.(input.params);
       return {
         requestId: 'request-0001',
@@ -96,6 +97,24 @@ function fakeClient(options?: {
     },
   };
   return { client: client as unknown as WorkerClient };
+}
+
+/**
+ * A gate the test opens by hand.
+ *
+ * The promise is pending until the test resolves it, and the resolver is
+ * captured by the executor of the promise itself, so the holder is a plain
+ * function instead of a variable the control flow analysis would narrow to
+ * null at the place where the test opens it.
+ */
+function deferred(): { readonly promise: Promise<void>; readonly resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = () => {
+      done();
+    };
+  });
+  return { promise, resolve };
 }
 
 /** A counter of the requests the fake received. */
@@ -460,18 +479,15 @@ describe('the adapter of the facade', () => {
   });
 
   it('answers RUN_IN_PROGRESS when the same key is already in flight', async () => {
-    let release: (() => void) | null = null;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    const gate = deferred();
     const adapter = new PythonWorkerAdapter({
       route: ROUTE,
       clientFactory: async () => {
         const fake = fakeClient();
         const client = {
           hello: fake.client.hello,
-          async request(input: { params: Record<string, unknown> }) {
-            await gate;
+          async request(input: WorkerRequestInput) {
+            await gate.promise;
             return fake.client.request(input);
           },
           async close() {
@@ -486,7 +502,7 @@ describe('the adapter of the facade', () => {
     // The second call lands while the first is still in flight.
     await new Promise((resolve) => setTimeout(resolve, 10));
     const second = await adapter.runEmbedding(REQUEST);
-    release?.();
+    gate.resolve();
 
     const firstOutcome = await first;
     expect(second.ok).toBe(false);
@@ -496,17 +512,17 @@ describe('the adapter of the facade', () => {
   });
 
   it('launches the worker as a module of the Python package by default', async () => {
-    let seen: { scriptPath?: string; scriptArgs?: readonly string[] } | null = null;
+    const launches: { scriptPath?: string; scriptArgs?: readonly string[] }[] = [];
     const adapter = new PythonWorkerAdapter({
       route: ROUTE,
       clientFactory: async (options) => {
-        seen = { scriptPath: options.scriptPath, scriptArgs: options.scriptArgs };
+        launches.push({ scriptPath: options.scriptPath, scriptArgs: options.scriptArgs });
         return fakeClient().client;
       },
     });
 
     await adapter.runEmbedding(REQUEST);
-    expect(seen?.scriptPath).toBe('-m');
-    expect(seen?.scriptArgs).toEqual(['visionlens.worker']);
+    expect(launches[0]?.scriptPath).toBe('-m');
+    expect(launches[0]?.scriptArgs).toEqual(['visionlens.worker']);
   });
 });
