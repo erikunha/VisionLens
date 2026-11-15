@@ -63,7 +63,7 @@ HYPERPARAMETERS: Dict[str, Any] = {
 }
 
 #: The epochs of the fixture and the interval of its checkpoints.
-EPOCHS = 3
+EPOCHS = 50
 CHECKPOINT_INTERVAL = 2
 
 
@@ -140,9 +140,18 @@ def write_feature_artifact(
     dimension: int,
     label_keys: Tuple[str, ...],
     run_id: str = "fixture-run",
+    poison_index: int | None = None,
 ) -> Path:
-    """Writes the artifact of features of the fixture items."""
+    """Writes the artifact of features of the fixture items.
+
+    `poison_index` writes a value that is not a number in one vector, so
+    that the refusal of the loader for it can be observed.
+    """
     vectors = [_vector_of(item.label_key, label_keys, dimension) for item in items]
+    if poison_index is not None:
+        poisoned = list(vectors[poison_index])
+        poisoned[0] = float("nan")
+        vectors[poison_index] = tuple(poisoned)
     manifest = EmbeddingRunManifest(
         embedding_run_id=run_id,
         model_id=MODEL_ID,
@@ -194,7 +203,7 @@ def test_the_run_trains_on_train_and_selects_on_val(tmp_path: Path) -> None:
     )
 
     assert len(run.curve) == EPOCHS
-    assert [point.epoch for point in run.curve] == [1, 2, 3]
+    assert [point.epoch for point in run.curve] == list(range(1, EPOCHS + 1))
     for point in run.curve:
         assert point.train_accuracy == 1.0
         assert point.val_accuracy == 1.0
@@ -260,7 +269,8 @@ def test_an_item_of_the_test_partition_in_the_selection_is_refused(
             tmp_path / "checkpoints",
         )
 
-    assert failure.value.code == "TRAINER_PARTITION_MISMATCH"
+    assert failure.value.code == "TRAINER_PARTITION_LEAK"
+    assert "partitions.test" in failure.value.field
 
 
 def test_the_checkpoint_lands_at_the_interval_and_at_the_last_epoch(
@@ -276,14 +286,18 @@ def test_the_checkpoint_lands_at_the_interval_and_at_the_last_epoch(
         checkpoints,
     )
 
-    assert len(run.checkpoints) == 2
+    expected_epochs = list(range(CHECKPOINT_INTERVAL, EPOCHS + 1, CHECKPOINT_INTERVAL))
+    if expected_epochs[-1] != EPOCHS:
+        expected_epochs.append(EPOCHS)
+
+    assert len(run.checkpoints) == len(expected_epochs)
     assert run.final_checkpoint == run.checkpoints[-1]
-    assert len(set(run.checkpoints)) == 2
+    assert len(set(run.checkpoints)) == len(expected_epochs)
 
     manifests = sorted(checkpoints.glob("*" + MANIFEST_SUFFIX))
-    assert len(manifests) == 2
+    assert len(manifests) == len(expected_epochs)
     loaded = [read_checkpoint(path) for path in manifests]
-    assert [item.epoch for item in loaded] == [CHECKPOINT_INTERVAL, EPOCHS]
+    assert [item.epoch for item in loaded] == expected_epochs
     assert tuple(item.manifest.checkpoint_sha256 for item in loaded) == run.checkpoints
     for item in loaded:
         assert (checkpoints / item.manifest.checkpoint_file).is_file()
@@ -449,6 +463,41 @@ def test_the_loader_pairs_the_vectors_by_the_digest_of_the_image(
         recipe.encoder.preprocessing_fingerprint
     )
     assert feature_set.missing == ()
+
+    # The pairing is by the digest of the image and NOT by the position: the
+    # vector of an item is the vector of ITS class. A loader that paired by
+    # the position would return the vector of another item and this
+    # assertion would fail.
+    label_keys = tuple(_label_keys_of_split())
+    dimension = recipe.encoder.output_shape["dimension"]
+    for item in items:
+        assert feature_set.vector_of(item.item_id) == _vector_of(
+            item.label_key, label_keys, dimension
+        )
+
+
+def test_a_vector_that_is_not_a_number_is_refused(tmp_path: Path) -> None:
+    """A vector of NaN is not a measurement, and it is refused."""
+    recipe = fixture_recipe()
+    items = _selected_items()
+    directory = write_feature_artifact(
+        tmp_path / "features",
+        items,
+        revision=recipe.encoder.revision,
+        preprocessing=recipe.encoder.preprocessing_fingerprint,
+        dimension=recipe.encoder.output_shape["dimension"],
+        label_keys=tuple(_label_keys_of_split()),
+        poison_index=0,
+    )
+
+    with pytest.raises(FeatureError) as failure:
+        load_features(
+            [directory],
+            recipe,
+            [(item.item_id, item.digest) for item in items],
+        )
+
+    assert failure.value.code == "FEATURES_VECTOR_NOT_FINITE"
 
 
 def test_an_artifact_of_another_revision_is_refused_naming_both_sides(
@@ -734,6 +783,12 @@ def test_an_assignment_without_a_digest_is_refused() -> None:
 
 
 def test_the_trainer_reads_only_the_selection_partitions() -> None:
-    """The test partition is not one of the partitions the trainer reads."""
-    assert SELECTION_PARTITIONS == ("train", "val")
+    """The test partition is not one of the partitions the trainer reads.
+
+    The constant of the selection is the source of the partitions the
+    trainer reads, and the run records the items it read. The two facts
+    together are the property, and the property is not a literal.
+    """
     assert "test" not in SELECTION_PARTITIONS
+    assert SELECTION_PARTITIONS[0] == "train"
+    assert SELECTION_PARTITIONS[1] == "val"
