@@ -95,6 +95,12 @@ jobs:
       - name: Embedding manifest schema is in sync
         run: pnpm exec tsx scripts/benchmarks/generate-manifest-schema.ts --check
 
+      # The recipe of a training run is resolved in Python and validated in
+      # TypeScript, and the two sides have to agree about its shape and
+      # about the address of its configuration.
+      - name: Training recipe parity (Python resolves, TypeScript validates)
+        run: pnpm run training:recipe:parity
+
       - name: Build (required by the golden bin tests)
         run: pnpm build
 
