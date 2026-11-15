@@ -341,6 +341,33 @@ def _checkpoint_file_of(manifest: CheckpointManifest) -> str:
     return name
 
 
+def _checked_inside(directory: Path, candidate: Path) -> None:
+    """Refuses a checkpoint that leaves the directory of the run.
+
+    A checkpoint is a file of the directory of the run, and a symlink inside
+    that directory can point anywhere: a reader that follows it reads a file
+    the run never published, and the digest it compares is the digest of a
+    file of somebody else.
+
+    @raises CheckpointError when the checkpoint is a link or leaves the run.
+    """
+    if candidate.is_symlink():
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_INVALID",
+            "manifest.checkpointFile",
+            f"the checkpoint '{candidate.name}' is a symlink, and a checkpoint is a file of "
+            "the directory of the run and not a link to a file of somebody else",
+        )
+    root = directory.resolve()
+    resolved = candidate.resolve()
+    if resolved != root and root not in resolved.parents:
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_INVALID",
+            "manifest.checkpointFile",
+            f"the checkpoint '{candidate.name}' resolves outside the directory of the run",
+        )
+
+
 def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
     """Reads a checkpoint back and refuses the ones that do not verify.
 
@@ -368,6 +395,7 @@ def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
     manifest = CheckpointManifest.from_dict(record)
 
     checkpoint_path = path.parent / _checkpoint_file_of(manifest)
+    _checked_inside(path.parent, checkpoint_path)
     if not checkpoint_path.is_file():
         raise CheckpointError(
             "CHECKPOINT_FILE_MISSING",

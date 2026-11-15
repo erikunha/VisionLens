@@ -600,3 +600,28 @@ def test_a_class_map_whose_label_key_is_not_a_name_is_refused() -> None:
         ClassMap.from_dict({"labelKeys": [1, NORMAL], "indexOf": {1: 0, NORMAL: 1}})
 
     assert failure.value.code == "PROBE_CLASS_SPACE_INVALID"
+
+
+
+
+def test_a_checkpoint_that_is_a_symlink_out_of_the_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint is a file of the run and not a link to a file of
+    somebody else."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    run = tmp_path / "run"
+    run.mkdir()
+    manifest = write_checkpoint(
+        run, model, epoch=1, recipe_fingerprint=recipe.fingerprint
+    )
+    outside = tmp_path / "outside-checkpoint.json"
+    outside.write_text("{}", encoding="utf-8")
+    (run / manifest.checkpoint_file).unlink()
+    (run / manifest.checkpoint_file).symlink_to(outside)
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(run / "checkpoint-000001.manifest.json")
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
