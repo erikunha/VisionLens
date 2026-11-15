@@ -18,9 +18,9 @@ amendment of 2026-11-14 of `docs/adr/011-python-first-ml-runtime.md`.
 | pnpm | 11.0.8 |
 | Python | 3.14.6 |
 | torch / transformers / Pillow / safetensors | 2.15.0 / 4.57.6 / 13.0.0 / 0.8.0 |
-| the branch | `feat/r1-vision-runtime` |
-| the base | `origin/main` at `5d8c1de` |
-| the tree | `ffc0fa76494458eb39057e14f22e948d470d9b59` (the commit before this record) |
+| the branch | `feat/r1-vision-runtime` (the sections 6.1 to 6.7), `feat/r1-ts-python-facade` (the section 6.8) |
+| the base | `origin/main` at `5d8c1de` (the sections 6.1 to 6.7), `4d5fb82` (the section 6.8) |
+| the tree | `ffc0fa76494458eb39057e14f22e948d470d9b59` (the sections 6.1 to 6.7), `c3fb246e44aa49ee9979effca96046780e459094` (the section 6.8) |
 | the date | 2026-11-14 |
 
 The commands below were run from the root of a worktree of the repository, and the Python ones
@@ -301,3 +301,97 @@ The record states the unverified parts as plainly as the verified ones:
   boundaries they stand behind;
 - the pack files under `docs/vnext/` were NOT edited: they are the verbatim source of the
   requirements, and this ticket changed no line of them.
+
+## 6.8 The recorded run over the worker channel
+
+The adapter was a library until the increment of this section: the run existed, it was measured
+and it was committed by the TypeScript side, and nothing in the worker reached it. The worker
+served only the SIMULATED shape, and the golden transcript of the package pinned that byte for
+byte. The worker serves the RECORDED shape now, and the gate below is the run over the channel.
+
+The command starts the REAL worker as a process, configures it with the environment of the real
+runtime, asks it for the recorded shape and reads the artifact back. It never writes into the
+tracked golden file or the tracked artifact.
+
+```bash
+cd python/visionlens && uv run --extra vision --group dev python scripts/verify_worker_embed.py
+```
+
+Exit 0, on the branch `feat/r1-ts-python-facade`, at the tree
+`c3fb246e44aa49ee9979effca96046780e459094`, with the same machine and the same versions the
+environment table names. The output:
+
+```text
+images: 6
+count: 6
+dimensions: 768
+dtype: float32
+embedding run id: embed-b87b292b54134e1b900c36b8414fe8d9
+artifact digest: 4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a
+error samples: 0
+progress frames: 2
+vectors digest of the set: 33cf54e30375a47dd703e25cbc1369b441ceffc911ba8c5fac2950966a12670c
+the run is green: the worker answered the recorded shape over the channel, the artifact on disk carries the digest the frame names, and the vectors are the golden ones
+```
+
+What the output proves, row by row:
+
+- the worker answered the RECORDED shape over the JSONL channel: the run id, the count, the
+  dimension, the dtype, the digest of the artifact and the error samples, and NO vector in the
+  line;
+- the digest the frame names is `4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a`,
+  the SAME content address the run over the library produced in 6.1. Two different paths, one
+  content;
+- the vectors of this run are the vectors of the committed golden set, digest for digest;
+- the run reported its progress: two progress frames, the first at zero and the last at six.
+
+The TypeScript side is proven against the same real worker, with the same real model and the
+same committed fixtures, by the suite of the bridge
+(`packages/core/tests/worker/operations.test.ts`): the suite launches the worker, asks it for
+the recorded shape and reads the typed success of the answer. It is skipped when the machine has
+not the `vision` extra and the weights in the local cache, because a test that fails for a
+missing download fails for the wrong reason.
+
+The golden transcript did not move. The simulated shape is answered by exactly the same code as
+before, and the transcript of the package is byte for byte the one that was committed:
+`python/visionlens/tests/test_golden.py` regenerates it and compares it byte for byte, in
+process and over a real subprocess.
+
+## 6.9 What the increment over the channel does NOT prove
+
+- NO TypeScript caller launches a worker configured with the runtime yet. The bridge can BUILD
+  the params of the recorded shape and can READ the answer, and the Python worker serves the
+  shape, but the facade that starts the worker with the environment of the runtime is the next
+  ticket (VLN-006). The capability is proven over the channel and not from the CLI;
+- the runtime is read ONCE, at the start of the worker, from four environment variables. A
+  worker that was started without them serves the simulated shape only, and it refuses the
+  recorded one with a message that names what is missing. A worker whose environment changes
+  while it runs does NOT see the change;
+- the run over the channel was measured on ONE machine on ONE day, with the same caveat of
+  every measurement of this record: the digest of the artifact is the address of the content and
+  does not move with the load of the machine;
+- the refusal of the recorded shape by a worker without the runtime is proven in the Python
+  suite and not over the wire, because the TypeScript suite of the bridge does not start a
+  worker without the runtime;
+- the weights were read from the local cache. The fetch of the weights was NOT performed inside
+  a worker, for the reason the 6.6 section names.
+
+### The gates of the tree of this increment
+
+Every gate of the tree of the section 6.8, with the command that ran it and the exit code it
+returned.
+
+| Gate | Command | Exit |
+|---|---|---|
+| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (446 passed and 1 skipped without the `vision` extra; 447 passed with it) |
+| Python types | `cd python/visionlens && uv run --group dev --extra vision --locked mypy src/visionlens` | 0 (37 files, no issues) |
+| Node suite | `pnpm exec vitest run` | 0 (111 files, 1312 passed, 3 skipped) |
+| Lint | `pnpm run lint` | 0 |
+| Type check | `pnpm run typecheck` | 0 (9 of 9 tasks) |
+| Boundary check | `pnpm run check:boundaries` | 0 |
+| Owner boundary check | `pnpm run check:owner-boundaries` | 0 (75 Python files, 8 worker host files) |
+| Doc drift | `pnpm run docs:check` | 0 (56 fields, 53 in the fixture) |
+| Container vendor | `node scripts/check-docker-vendor.mjs` | 0 |
+| Vision parity | `pnpm exec tsx scripts/benchmarks/vision-parity.ts` | 0 (3 tiers) |
+| Registry parity | `pnpm exec tsx scripts/registry/parity-check.ts` | 0 (257 cases, 0 disagreements) |
+| The recorded run over the channel | `cd python/visionlens && uv run --extra vision --group dev python scripts/verify_worker_embed.py` | 0 |

@@ -107,7 +107,7 @@ Two gates stand between the worker and the network:
 
 - the MODE of the worker: provider access has to be explicitly required
   for this worker, and the default says it was not
-  (`python/visionlens/src/visionlens/worker.py:43`). The mode is read
+  (`python/visionlens/src/visionlens/worker.py:44`). The mode is read
   from `VISIONLENS_WORKER_NETWORK`, and an unrecognised value is read as
   the refusal, because an unknown request for the network is not a request
   for the network;
@@ -160,7 +160,7 @@ the payload of a result to the operation: the result is free-form JSON but
 it must be stable per operation
 (`packages/contracts/src/worker/event.ts`). The bridge is where that
 stability is written down
-(`packages/core/src/worker/operations.ts:534`): for every operation it
+(`packages/core/src/worker/operations.ts:674`): for every operation it
 names the code, the params it sends, the typed success it accepts and the
 typed error it reports.
 
@@ -184,7 +184,7 @@ The typed error carries the frozen code, the message and the retryable
 flag: the frozen flag of the code, read from the frozen table and never
 guessed, for a failure the worker reported, and the flag the HOST itself
 uses for a failure of the CHANNEL, because the host is the one that
-decides whether to retry (`packages/core/src/worker/operations.ts:456`). A
+decides whether to retry (`packages/core/src/worker/operations.ts:506`). A
 failure of the channel is reported with the code that names it, because the
 frozen vocabulary has no other code for it and the bridge never invents
 one.
@@ -194,6 +194,74 @@ because the owner boundary of `packages/core/src/worker/` allows the Node
 stdlib, the contracts package, that directory and `packages/core/src/utils/`,
 and nothing else. A boundary that is widened for a convenience is a
 boundary that is not enforced.
+
+## The worker and the two shapes
+
+The adapter was a LIBRARY until this increment: the CPU run existed, it
+was measured and it was committed by the TypeScript side, and nothing in
+the worker reached it. The worker served only the simulated shape, the
+deterministic vectors of the frozen protocol, and the golden transcript
+of the package pinned that byte for byte.
+
+The worker serves BOTH shapes now, and the params of the request name
+the one it asks for:
+
+| shape | the params | who answers |
+|---|---|---|
+| the simulated one | `images` | the deterministic runtime of the frozen protocol |
+| the recorded one | `assets` and a `snapshotId` | the CPU adapter, with the real model |
+
+A request that carries BOTH is refused before the worker is asked: a
+request that claims two shapes asks for a run nobody can serve. A request
+that carries neither is refused too, because the operation serves those
+two shapes and nothing else. The golden transcript did not move: the
+simulated shape is answered by exactly the same code as before.
+
+The runtime of the recorded shape is OPT IN, and four environment
+variables configure it:
+
+| variable | what it names |
+|---|---|
+| `VISIONLENS_WORKER_REGISTRY` | the capability registry, the file that carries the pinned records |
+| `VISIONLENS_WORKER_MODEL_ROOT` | the cache of the weights, the directory the loader writes |
+| `VISIONLENS_WORKER_ASSET_ROOT` | the approved root every asset path resolves inside |
+| `VISIONLENS_WORKER_ARTIFACT_ROOT` | the root the artifacts are written under |
+
+A worker that was not configured with them serves the simulated shape
+only, and it refuses the recorded one with a message that NAMES what is
+missing. A worker that quietly answered a recorded request with a
+simulation would be a worker that answered with something nobody asked
+for.
+
+The runtime reads the weights from the local cache and never reaches the
+network: the record pins the digest of the weights and the adapter
+verifies it before it builds the model
+(`python/visionlens/src/visionlens/encoders/siglip2.py:1`). The device
+planner is the only resolver of the device, and the run records the
+device it really used.
+
+The failure of the runtime is mapped onto the frozen wire vocabulary,
+and the mapping is written down because a refusal whose code is a guess
+is a refusal the caller cannot act on
+(`python/visionlens/src/visionlens/operations.py:261`):
+
+| what fails | the wire code |
+|---|---|
+| the extra is not installed | `MISSING_EXTRA` |
+| the device is not admitted | `UNSUPPORTED_PROTOCOL` |
+| the model is not in the registry, and the run embedded nothing | `MALFORMED_FRAME` |
+| the model refused the run, the registry cannot be read, the memory ran out | `WORKER_CRASHED` |
+
+The message of a refusal names the CONDITION and never the path, and the
+error samples of a run name the asset and the code of the refusal
+without the place of the asset on the disk: the logs and the traces of
+this platform record hashes and ids instead of the local paths of the
+user
+(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+
+The run reports its PROGRESS and asks for a CHECKPOINT between its
+steps, so a cancellation and a deadline keep their own code and stop a
+long run at the next batch, and not at the end of the model call.
 
 ## The failure matrix
 

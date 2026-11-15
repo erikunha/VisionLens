@@ -231,7 +231,7 @@ than of a function, in `python/visionlens/src/visionlens/runtime/netguard.py`:
   local, on the Python socket class and on the raw socket of the C module;
 - two gates stand between the worker and the network. The MODE of the worker: provider access has
   to be explicitly required for this worker, and the default says it was not
-  (`python/visionlens/src/visionlens/worker.py:43`). The SCOPE: even a worker that requires
+  (`python/visionlens/src/visionlens/worker.py:44`). The SCOPE: even a worker that requires
   provider access reaches the network only inside an explicit allowance, and only for as long as
   the scope lasts. The allowance belongs to the THREAD that opened it, so a scope never opens the
   door for the other threads of the worker;
@@ -301,6 +301,52 @@ pack forbids, so it was split in two: the mixed case keeps the error sample and 
 embed, and the new case asserts the typed error and the absence of an artifact. No other test
 changed, and no threshold was lowered.
 
+## Amendment 2026-11-14: the worker serves the recorded shape of `vision.embed`
+
+**Deciders**: @erikunha (the maintainer directed shipping the CPU vision adapter on 2026-11-14;
+the call was delegated to the delivery loop and recorded here).
+
+The CPU adapter of VLN-005 was a LIBRARY that nothing reached. The worker of the frozen protocol
+served only the SIMULATED shape of `vision.embed`, the deterministic vectors derived from the
+model record, and the golden transcript of the package pinned that byte for byte. The adapter was
+measured, it was committed by the TypeScript side, and no caller could ask for it.
+
+**What changes.** The worker serves BOTH shapes, and the params of the request name the one it
+asks for (`python/visionlens/src/visionlens/operations.py:168`):
+
+- an input that carries `images` asks for the simulated shape, and it is answered by exactly the
+  code that answered it before;
+- an input that carries `assets` and a `snapshotId` asks for the recorded shape, and the CPU
+  adapter answers it: the run id, the count, the dimension, the dtype, the digest of the artifact
+  and the error samples, with the vectors on disk
+  (`python/visionlens/src/visionlens/inference/service.py:191`);
+- a request that carries BOTH is refused before the worker is asked, because a request that claims
+  two shapes asks for a run nobody can serve. A request that carries neither is refused too.
+
+The runtime is OPT IN. Four environment variables configure it: the registry of the records, the
+cache of the weights, the approved root of the assets and the root of the artifacts
+(`python/visionlens/src/visionlens/inference/service.py:386`). A worker that was not configured
+with them serves the simulated shape only and refuses the recorded one with a message that NAMES
+what is missing. The refusal is deliberate: a worker that quietly answered a recorded request with
+a simulation would be a worker that answered with something nobody asked for.
+
+The failure of the runtime is mapped onto the frozen wire vocabulary, and the ten wire codes stay
+exactly the ten they were (`python/visionlens/src/visionlens/operations.py:261`). The message of a
+refusal names the CONDITION and never the path, and so do the error samples of a run: the logs
+and the traces of this platform record hashes and ids instead of the local paths of the user
+(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+
+**What does not change.** The frozen frames, the frozen vocabulary and the golden transcript do
+not move: the simulated shape is answered by the same code and the transcript is byte for byte
+the one that was committed. The adapter, the artifact and its manifest do not change either, and
+the content address of a run over the channel is the same address the run over the library
+produced (`4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a`).
+
+**The scope of the call.** The bridge of the TypeScript side builds the params of the recorded
+shape and reads the answer, and no TypeScript caller starts a worker configured with the runtime
+yet: the facade that does it is the ticket that follows (VLN-006). The capability is proven over
+the channel and not from the CLI.
+
 ## As built today
 
 | Side | Ships | Evidence |
@@ -310,7 +356,7 @@ changed, and no threshold was lowered.
 | Python | three service skeletons as thin adapters (`SERVICE_NAME` only, no dependencies) | `services/vision/src/vision_lens_vision/__init__.py:3`, `services/vision/pyproject.toml:6` |
 | Python | the worker runtime container: the vendored wheel copy, no Node, byte-guarded | `docker/runtime/`, `scripts/check-docker-vendor.mjs:1` |
 | TypeScript | the worker host: spawn, framing, handshake, cancel ladder, deadline, budget | `packages/core/src/worker/client.ts:1` |
-| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:534` (the registry), `:407` (the typed success), `:444` (the typed error) |
+| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:674` (the registry), `:407` (the typed success), `:444` (the typed error) |
 | Shared | the frozen vocabulary, defined once per language and proven identical | `packages/contracts/src/worker/protocol.ts:19`, `python/visionlens/src/visionlens/protocol.py:18` |
 | Cross-language | the real TypeScript host against the real Python worker over the wire | `packages/core/tests/worker/python-integration.test.ts:21-34` |
 
