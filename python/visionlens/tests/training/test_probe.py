@@ -528,3 +528,25 @@ def test_a_model_whose_rows_carry_another_dimension_is_refused() -> None:
 
     assert failure.value.code == "PROBE_MODEL_INVALID"
 
+
+def test_a_publication_that_fails_is_refused_in_the_vocabulary_of_the_run(
+    tmp_path: Path,
+) -> None:
+    """A write that fails is a refusal of the checkpoint and not an OSError."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    try:
+        try:
+            write_checkpoint(
+                locked, model, epoch=1, recipe_fingerprint=recipe.fingerprint
+            )
+        except CheckpointError as error:
+            assert error.code == "CHECKPOINT_WRITE_FAILED"
+            return
+    finally:
+        locked.chmod(0o700)
+    pytest.skip("this environment writes in a directory without the write bit")
+

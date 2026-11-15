@@ -228,7 +228,7 @@ def write_checkpoint(
     ).encode("utf-8")
     digest = sha256_of_bytes(body)
     checkpoint_path = target / (digest + CHECKPOINT_SUFFIX)
-    _written_atomically(checkpoint_path, body)
+    _published(checkpoint_path, body)
 
     manifest = CheckpointManifest(
         version=CHECKPOINT_VERSION,
@@ -251,7 +251,7 @@ def write_checkpoint(
             f"{existing.checkpoint_sha256} and this run publishes another digest with it; "
             "two checkpoints of one epoch are two runs",
         )
-    _written_atomically(
+    _published(
         manifest_path,
         (
             json.dumps(manifest.to_dict(), sort_keys=True, indent=2, ensure_ascii=False)
@@ -259,6 +259,21 @@ def write_checkpoint(
         ).encode("utf-8"),
     )
     return manifest
+
+
+def _published(path: Path, payload: bytes) -> None:
+    """Publishes a file, and refuses the failure in the vocabulary of the run.
+
+    @raises CheckpointError when the file cannot be written.
+    """
+    try:
+        _written_atomically(path, payload)
+    except OSError as error:
+        raise CheckpointError(
+            "CHECKPOINT_WRITE_FAILED",
+            "checkpoint",
+            f"the file '{path.name}' cannot be published: {error}",
+        ) from error
 
 
 def _existing_manifest(manifest_path: Path) -> CheckpointManifest | None:
