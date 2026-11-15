@@ -742,3 +742,24 @@ def test_a_class_weight_of_zero_is_refused() -> None:
         )
 
     assert failure.value.code == "PROBE_CLASS_WEIGHT_INVALID"
+
+
+
+
+def test_a_manifest_whose_class_map_is_inconsistent_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The class map of the manifest is read by the checkpoint and not by the
+    probe, so the refusal is a refusal of the checkpoint."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["classMap"]["indexOf"][NORMAL] = 7
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"

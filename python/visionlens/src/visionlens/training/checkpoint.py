@@ -123,6 +123,15 @@ class CheckpointManifest:
                 "manifest",
                 f"the manifest does not carry the shape of a checkpoint: {error}",
             ) from error
+        except ProbeError as error:
+            # The refusal is a refusal of the MANIFEST and not of the probe:
+            # a caller of the checkpoint catches one vocabulary and not the
+            # other.
+            raise CheckpointError(
+                "CHECKPOINT_MANIFEST_INVALID",
+                "manifest.classMap",
+                f"the manifest carries no class map it can read: {error.reason}",
+            ) from error
         return CheckpointManifest(
             version=str(record.get("manifestVersion", CHECKPOINT_VERSION)),
             checkpoint_file=str(record.get("checkpointFile", "")),
