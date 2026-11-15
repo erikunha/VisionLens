@@ -1,4 +1,4 @@
-import type { WorkerErrorCode } from '@vision-lens/contracts';
+import { WORKER_ERROR_RETRYABLE, type WorkerErrorCode } from '@vision-lens/contracts';
 
 /**
  * The typed errors of the facade.
@@ -90,7 +90,16 @@ export class FacadeError extends Error {
     this.name = 'FacadeError';
     this.code = code;
     const own = OWN_CODES[code as FacadeOwnErrorCode];
-    this.retryable = own?.retryable ?? false;
+    // The flag of a code the WORKER reported is read from the frozen table
+    // and never guessed: the table ships with the vocabulary so that a
+    // consumer does not have to know which of the ten codes may be
+    // retried. The lookup uses `hasOwn` because a lookup finds the
+    // members of the prototype chain too.
+    this.retryable =
+      own?.retryable ??
+      (Object.hasOwn(WORKER_ERROR_RETRYABLE, code)
+        ? WORKER_ERROR_RETRYABLE[code as WorkerErrorCode]
+        : false);
     this.exitCode = own?.exitCode ?? WORKER_EXIT_CODES[code as WorkerErrorCode] ?? FACADE_EXIT_CODES.runtime;
   }
 }
