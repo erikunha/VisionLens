@@ -72,6 +72,8 @@ export interface PythonWorkerAdapterOptions {
   readonly interpreter?: string;
   /** The script of the worker; defaults to the one of the worker host. */
   readonly scriptPath?: string;
+  /** Extra argv entries after the script path. */
+  readonly scriptArgs?: readonly string[];
   /** Extra environment entries handed to the worker. */
   readonly env?: NodeJS.ProcessEnv;
   /** The contract version the requests are stamped with. */
@@ -228,6 +230,7 @@ export class PythonWorkerAdapter implements VisionOperationPort {
         ? { interpreter: this.options.interpreter }
         : {}),
       ...(this.options.scriptPath !== undefined ? { scriptPath: this.options.scriptPath } : {}),
+      ...(this.options.scriptArgs !== undefined ? { scriptArgs: this.options.scriptArgs } : {}),
       ...(this.options.contractVersion !== undefined
         ? { contractVersion: this.options.contractVersion }
         : {}),
