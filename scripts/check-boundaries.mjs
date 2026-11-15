@@ -18,6 +18,12 @@
  *       boundary rule of the boundary-table row in AGENTS.md
  *   - packages/core/src/worker/…/worker-clean.ts stdlib + contracts
  *     → eslint MUST pass (exit 0)
+ *   - packages/core/src/facade/…/facade-violating.ts imports the store
+ *     → eslint MUST fail (exit 1): the path matches the facade-scoped
+ *       boundary rule of the boundary-table row in AGENTS.md
+ *   - packages/core/src/facade/…/facade-clean.ts stdlib + contracts + the
+ *     worker client
+ *     → eslint MUST pass (exit 0)
  *
  * Why stdin and not a file: a planted violation is a violation. While it sat
  * in the tree, every other tool that walks the tree read it as source: the
@@ -79,6 +85,28 @@ const WORKER_CLEAN_PATH = path.join(
   'worker-clean.ts',
 );
 
+// Under packages/core/src/facade/, at the SAME DEPTH as the real files of
+// the module: the boundary rule matches the import specifier as it is
+// written, and a real facade file reaches the store as '../store/...'. A
+// fixture nested one level deeper would write '../../store/...' and would
+// NOT match the rule, which would prove nothing.
+const FACADE_VIOLATING_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-violating.ts',
+);
+const FACADE_CLEAN_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-clean.ts',
+);
+
 const VIOLATING = `import OpenAI from 'openai';
 // Deliberate boundary violation fixture — must trip no-restricted-imports.
 export const client = OpenAI;
@@ -100,6 +128,25 @@ import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
 // Clean worker fixture: node stdlib plus contracts, must lint green.
 export const protocol = WORKER_PROTOCOL_ID;
 export const spawnWorker = spawn;
+`;
+
+const FACADE_VIOLATING = `import { DerivedArtifactsRepository } from '../store/repositories/derived-artifacts.js';
+// Deliberate facade boundary violation fixture: the facade may not reach the
+// store directly, because the store is the domain writer and the facade
+// only asks it to commit a row.
+export const artifacts = DerivedArtifactsRepository;
+`;
+
+const FACADE_CLEAN = `import { createHash } from 'node:crypto';
+import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
+import { WorkerClient } from '../worker/index.js';
+import type { PythonRouteConfig } from '../config/index.js';
+// Clean facade fixture: node stdlib plus contracts plus the worker client
+// plus the types of the route, must lint green.
+export const digest = createHash('sha256');
+export const protocol = WORKER_PROTOCOL_ID;
+export const client = WorkerClient;
+export type { PythonRouteConfig };
 `;
 
 /**
@@ -175,6 +222,34 @@ try {
   } else {
     console.log('ok: worker clean fixture (node:child_process + contracts) lints green');
   }
+
+  const facadeViolating = runEslint(FACADE_VIOLATING, FACADE_VIOLATING_PATH);
+  if (facadeViolating.status !== 1) {
+    failed = true;
+    console.error(
+      `FAIL: facade violating fixture should exit 1 (direct store access inside facade/), got ${facadeViolating.status}\n${facadeViolating.stdout}${facadeViolating.stderr}`,
+    );
+  } else if (
+    !facadeViolating.stdout.includes('no-restricted-imports') ||
+    !facadeViolating.stdout.includes('packages/core/src/facade')
+  ) {
+    failed = true;
+    console.error(
+      `FAIL: violation reported, but not by the facade boundary rule:\n${facadeViolating.stdout}`,
+    );
+  } else {
+    console.log('ok: direct store access inside facade/ is rejected (no-restricted-imports)');
+  }
+
+  const facadeClean = runEslint(FACADE_CLEAN, FACADE_CLEAN_PATH);
+  if (facadeClean.status !== 0) {
+    failed = true;
+    console.error(
+      `FAIL: facade clean fixture should exit 0, got ${facadeClean.status}\n${facadeClean.stdout}${facadeClean.stderr}`,
+    );
+  } else {
+    console.log('ok: facade clean fixture (node stdlib + contracts + worker) lints green');
+  }
 } catch (error) {
   failed = true;
   console.error(`FAIL: unexpected error: ${String(error)}`);
@@ -184,4 +259,6 @@ if (failed) {
   console.error('boundary check FAILED');
   process.exit(1);
 }
-console.log('boundary check passed: LLM SDK and worker violating fixtures caught, clean fixtures green');
+console.log(
+  'boundary check passed: LLM SDK, worker and facade violating fixtures caught, clean fixtures green',
+);
