@@ -13,13 +13,13 @@ wraps is described in `docs/architecture/vision-adapter.md`.
 |---|---|
 | the machine | macOS 26.6.2 (Darwin 25.6.0), arm64, Apple M2 |
 | Node | v24.22.1 |
-| pnpm | 12.14.0 |
+| pnpm | 11.0.8 (the version the repository pins in `packageManager`) |
 | Python (the virtual environment of the package) | 3.14.6 |
 | torch / transformers | 2.15.0 / 4.57.6 |
 | the branch | `feat/r1-ts-python-facade` |
 | the base | `origin/main` at `4d5fb82` |
-| the commit | `aa7805c` |
-| the tree | `7c3313c3501124302735576cd8a17ffde153fa52` |
+| the commit | `998cf6b` |
+| the tree | `68c78487472abd74a6f4d8f89f14ca04adbda5d2` |
 | the date | 2026-11-15 |
 
 The commands below were run from the root of a worktree of the repository, and the Python ones
@@ -32,7 +32,10 @@ the Python package, the handshake completes, the request goes over the frozen ch
 Python side writes the artifact, the facade validates it on disk and publishes a relative,
 content addressed reference. The command lives in the repository
 (`scripts/facade/embed-run.ts`) and resolves every path from its own location, so a reader runs it
-without editing it and without the path of the machine that wrote it.
+without editing it and without the path of the machine that wrote it. The artifact is written
+under a temporary root OUTSIDE the tree, and the root is removed when the command ends: the
+evidence of the run is the output of the command, not a directory that accumulates on the machine
+of the reader.
 
 ```bash
 pnpm exec tsx scripts/facade/embed-run.ts
@@ -42,13 +45,13 @@ Exit 0. The output:
 
 ```text
 {
-  "embeddingRunId": "embed-3fb9815cb1c44ec992260faf042e5bfa",
+  "embeddingRunId": "embed-4c951363162142908a41f956c863453c",
   "count": 6,
   "dimensions": 768,
   "dtype": "float32",
   "artifact": {
     "kind": "embedding",
-    "relativePath": "artifacts/embedding/embed-3fb9815cb1c44ec992260faf042e5bfa",
+    "relativePath": "artifacts/embedding/embed-4c951363162142908a41f956c863453c",
     "sha256": "4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a",
     "bytes": 18432
   },
@@ -56,7 +59,7 @@ Exit 0. The output:
   "contractVersion": "1.0.0",
   "protocolVersion": "1.0.0",
   "errorSamples": [],
-  "runId": "run-7c0fcb8a-dbc4-4611-b8d3-24ce0fde75e7",
+  "runId": "run-ad48dd40-abca-48e1-b33f-861ae5a33c11",
   "transitions": ["queued", "running", "succeeded"]
 }
 ```
@@ -85,8 +88,10 @@ What the output proves, row by row:
 - `transitions` is the lifecycle of the run: queued, running, succeeded. A terminal state is
   immutable, and the first outcome stands.
 
-The same run is a test of the suite, and it SKIPS when the machine has neither the weights nor
-the virtual environment: `packages/core/tests/facade/python-integration.test.ts`.
+The suite drives the SAME path over the real worker, and it SKIPS when the machine has neither the
+weights nor the virtual environment: `packages/core/tests/facade/python-integration.test.ts`. The
+run of the suite embeds the snapshot `fixtures-2026-11-15`, and the snapshot is part of the
+content, so that run publishes an address of its own and not the one recorded above.
 
 ```bash
 PATH="$PWD/python/visionlens/.venv/bin:$PATH" pnpm exec vitest run packages/core/tests/facade/python-integration.test.ts
@@ -107,14 +112,14 @@ Every gate of the repository, at the commit named above.
 |---|---|---|---|
 | lint | `pnpm run lint` | 0 | no finding |
 | typecheck | `pnpm run typecheck` | 0 | `Tasks: 9 successful, 9 total` |
-| the suite | `pnpm run test:coverage` | 0 | `Test Files 121 passed \| 1 skipped (122)`, `Tests 1411 passed \| 3 skipped (1414)` |
-| the coverage of the facade | the same run | 0 | `facade 90.72% statements, 80.81% branches, 94.11% functions, 91.95% lines`; the repository `92.5% / 81.88% / 95.09% / 93.64%` against the thresholds `75 / 75 / 85 / 75` |
+| the suite | `pnpm run test:coverage` | 0 | `Test Files 121 passed \| 1 skipped (122)`, `Tests 1413 passed \| 3 skipped (1416)` |
+| the coverage of the facade | the same run | 0 | `facade 90.72% statements, 80.81% branches, 94.11% functions, 91.95% lines`; the repository `92.48% / 81.81% / 95.09% / 93.64%` against the thresholds of the config (`lines 75`, `functions 85`, `branches 75`) |
 | the module boundary | `pnpm run check:boundaries` | 0 | `boundary check passed: LLM SDK, worker and facade violating fixtures caught, clean fixtures green` |
 | the owner boundary | `pnpm run check:owner-boundaries` | 0 | `owner boundary check passed: 75 Python files import no TypeScript, 8 worker host files stay on the protocol, the visionlens.worker.v1 vocabulary is identical on both sides, and the self-proof fired on every planted violation` |
 | the documentation drift | `pnpm run docs:check` | 0 | `ok: the documented makeConfig() matches the Config interface (55 fields, 53 in the fixture)` |
 | the vendored container | `node scripts/check-docker-vendor.mjs` | 0 | `docker vendor check passed: docker/runtime/python/visionlens matches python/visionlens (wheel source subset)` |
 | the schema of the manifest | `pnpm exec tsx scripts/benchmarks/generate-manifest-schema.ts --check` | 0 | `manifest schema is in sync with the Zod schema` |
-| the Python suite | `uv run --group dev pytest tests -q` | 0 | `449 passed in 30.77s` |
+| the Python suite | `uv run --group dev pytest tests -q` | 0 | `449 passed in 34.63s` |
 | the types of the Python side | `uv run --group dev --extra vision --locked mypy src/visionlens` | 0 | `Success: no issues found in 37 source files` |
 | the golden parity | `pnpm exec tsx scripts/benchmarks/vision-parity.ts` | 0 | `vision parity passed: the artifact and the golden file agree` |
 | the registry parity | `pnpm exec tsx scripts/registry/parity-check.ts` | 0 | `registry parity passed: the two readers agree on every accept and every refusal` |
@@ -130,20 +135,39 @@ rm -rf /tmp/vlgate-facade3 && cp -R python/visionlens /tmp/vlgate-facade3 && cd 
 ## 7.3 The refusals, one by one
 
 Each refusal was produced by the built bin or by the suite, and each carries a code, a retryable
-flag and an exit code.
+flag and an exit code. The map is COMPLETE: the facade can answer with the eight codes it owns
+and with the ten codes of the frozen vocabulary of the worker, and every one of them has a place
+here.
+
+The codes the facade owns (`packages/core/src/facade/errors.ts`, `OWN_CODES`):
 
 | what | code | retryable | exit | where |
 |---|---|---|---|---|
 | the route is off | `ROUTE_DISABLED` | no | 3 | the command |
 | the operation is not one the facade routes | `OPERATION_UNSUPPORTED` | no | 2 | the registry and the route |
 | the request is invalid (no asset, no budget, no artifact root) | `REQUEST_INVALID` | no | 2 | the run and the route |
+| the same key is already in flight | `RUN_IN_PROGRESS` | yes | 5 | the ledger |
 | the worker could not be started | `WORKER_UNAVAILABLE` | no | 3 | the launch |
 | the worker never answered its hello | `HANDSHAKE_FAILED` | yes | 3 | the launch |
-| the worker died | `WORKER_CRASHED` | yes | 5 | the launch and the channel |
 | the bytes on disk do not match the manifest | `ARTIFACT_INVALID` | no | 5 | the artifact |
-| the payload is not the shape the operation promises | `MALFORMED_FRAME` | no | 5 | the bridge |
 | the row was not committed | `STORE_WRITE_FAILED` | yes | 5 | the sink |
-| the same key is already in flight | `RUN_IN_PROGRESS` | yes | 5 | the ledger |
+
+The codes the WORKER reports, with the exit code the facade assigns to them
+(`WORKER_EXIT_CODES`) and the retryable flag of the frozen table
+(`WORKER_ERROR_RETRYABLE`, `packages/contracts/src/worker/protocol.ts`):
+
+| what the worker reported | code | retryable | exit | where |
+|---|---|---|---|---|
+| the protocol of the worker is not the one of the host | `UNSUPPORTED_PROTOCOL` | no | 4 | the channel |
+| the build of the worker lacks the extra the model needs | `MISSING_EXTRA` | no | 4 | the worker |
+| the payload is not the shape the operation promises | `MALFORMED_FRAME` | no | 5 | the bridge |
+| the contract of the worker is not the one of the host | `PROTOCOL_MISMATCH` | no | 4 | the handshake |
+| the worker does not serve the operation | `UNSUPPORTED_OPERATION` | no | 2 | the capability |
+| the run was cancelled | `CANCELLED` | no | 5 | the channel |
+| the budget of the request elapsed | `DEADLINE_EXCEEDED` | no | 5 | the channel |
+| the budget of the request was exhausted | `BUDGET_EXCEEDED` | no | 5 | the channel |
+| the worker died | `WORKER_CRASHED` | yes | 5 | the launch and the channel |
+| the worker cannot reach the provider it needs | `PROVIDER_UNAVAILABLE` | yes | 3 | the worker |
 
 The two refusals the command prints, from the built bin:
 
@@ -185,7 +209,7 @@ the findings were fixed before the increment was pushed.
 | the artifact root was validated AFTER the worker ran | major | a route without a root ran the whole embedding and refused at the end | the route is checked before the process is launched |
 | the legacy path read new environment variables, and a new variable could break every legacy command | major | the route was resolved inside `loadConfig` | the legacy path does not resolve the route at all |
 | the facade carried a WEAKER copy of the manifest contract | major | it accepted a manifest the validator the repository ships refuses | the facade calls `validateEmbeddingManifest` and `embeddingContentDigest` |
-| the facade could not launch the worker at all | blocker | `scriptArgs` was never plumbed and no `worker.py` exists | the launch defaults to `python3 -m visionlens.worker` |
+| the facade could not launch the worker at all | blocker | `scriptArgs` was never plumbed and the host resolved the script against the working directory, where the package ships no `worker.py` (the worker is the module `python/visionlens/src/visionlens/worker.py`) | the launch defaults to `python3 -m visionlens.worker` |
 | an operation the facade does not route was refused with the code of the route | major | two codes for one condition | the two refusals are different facts and carry different codes |
 | the retryable flag of `WORKER_UNAVAILABLE` was a guess | major | every launch failure was retryable | the kind of the failure decides the flag, and the codes of the worker keep the flags of the frozen table |
 | the port threw instead of answering a typed outcome | major | an invalid request raised an exception | the port answers a refusal |
@@ -207,7 +231,28 @@ record, found four more things, and every one of them was a fact the record itse
 | the suite of the facade did not typecheck | blocker | the fake worker of the adapter declared a request of its own shape, and the gate that covers the suite of the facade was a cache hit that hid it | the fake takes the input the worker client takes, and the gate the test opens by hand is a plain function |
 | the command of the record lived outside the repository | major | the verification cited a script in a temporary directory, so a reader could not run it | the command is `scripts/facade/embed-run.ts`, it resolves every path from its own location and it carries no path of a machine |
 | the address of the run was not the address of the library | major | the run embedded the snapshot `fixtures-2026-11-15` and the golden artifact carries `fixtures-2026-11-14`, and the snapshot is part of the content | the command embeds the snapshot of the golden artifact, and the run publishes `4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a`, the address the library published and the address of the committed golden artifact |
-| the environment of the record named the wrong pnpm | minor | the table said `11.0.8` and the machine has `12.14.0` | the table names `12.14.0` |
+
+### 7.4.2 The third pass, over the increment and over the record
+
+Three specialists reviewed the increment with three lenses: the truth of the documentation, the
+code and the security of the new command, and the claims of the pull request. The verdicts were
+PARTIAL on the first, PASS on the second and FAIL on the third. Every finding below was fixed
+before the increment was pushed, and every fix carries its own guard.
+
+| finding | severity | what it was | what changed |
+|---|---|---|---|
+| the map of the refusals was not complete | major | the map named the eight codes of the facade and two of the worker, and the facade can answer with all ten codes of the frozen vocabulary, including the only codes of the exit 4 | the map of the record carries the eighteen codes, and the codes of the worker are separated from the codes of the facade |
+| the facade reached a module of the adapter that the boundary did not name | major | the facade imports the contract of the manifest, and neither the boundary table nor the owner map named it | the boundary names the contract of the manifest, the rule of the facade refuses every other module of the adapter, and the gate enumerates the modules of the adapter and proves that every one of them but the contract is refused |
+| the pull request said that the adapter did not change | major | the adapter of the Python package changed in this increment, to serve the recorded shape | the pull request says what did not change, and the change of the adapter is named |
+| the environment of the record named the pnpm of the machine | minor | the pnpm that runs the gates is the one the repository pins (`packageManager`), and the record had named another | the table names `11.0.8`, the pinned version |
+| the thresholds of the coverage were four, and there are three | minor | the config carries `lines 75`, `functions 85` and `branches 75`, and the record listed a threshold of statements that does not exist | the table names the three thresholds of the config |
+| the format `none` was advertised and not implemented | minor | the help of the command and the README offered `pretty`, `json` and `none`, and every format but `json` printed the summary | the format `none` prints nothing, the decision is a pure function and the suite asserts it |
+| the environment of the command was not complete | minor | the README listed the variables of the route and not the variable that names the interpreter of the worker | the table names `VISION_LENS_WORKER_INTERPRETER` |
+| the vocabulary of the jobs has seven states | minor | the ADR said six, and the vocabulary carries seven since the migration that added `cancel_requested` | the ADR says seven |
+| the run of the suite was not the run of the record | minor | the sentence said the same run, and the suite embeds a snapshot of its own | the sentence says that the suite drives the same path and publishes an address of its own |
+| the command left a temporary directory on every run | minor | the root of the artifact was never removed, and a failed run left one that looked like the evidence of a run that worked | the root is removed when the command ends, on the failure path too |
+| the command did not say what the environment it needs is | minor | without the virtual environment the run answered with a refusal that named a capability, and the reader had no way to know what to create | the command checks the environment before the run and names the command that creates it |
+| the root of the artifact was not checked against the tree | minor | the root came from the temporary directory of the environment, and a machine whose TMPDIR points inside the working directory would have written the evidence into the tracked tree | the command refuses to run when the root is inside the repository |
 
 ## 7.5 What the increment did NOT prove
 
@@ -222,5 +267,12 @@ record, found four more things, and every one of them was a fact the record itse
   facade and the widening of the job vocabulary is a separate ticket with a numbered migration.
 - Only one operation is routed. `vision.predict` and the other codes of the wire stay
   unreachable from TypeScript.
+- No run wrote a row into a REAL store. The sink of the facade is exercised with a fake, and the
+  command that supplies the real one was never driven against a migrated database: the store
+  wants the lineage of the row to exist first, and no fixture of this increment creates an asset
+  and a snapshot for it.
 - The run was measured on one machine, on the CPU, with one model. There is no accelerator in the
-  matrix, no calibration of the embeddings and no throughput number.
+  matrix and no calibration of the embeddings. The latency of the ADAPTER over the same six
+  fixtures is recorded in `docs/architecture/vision-adapter-verification.md`, and it is the
+  latency of one machine on one day; the facade run of this record carries no latency number of
+  its own.

@@ -10,11 +10,11 @@
 
 VLN-006 asks for an application service that lets the shipped Node tooling reach the Python ML
 runtime "as a new option without altering the old `vision-lens` behaviour"
-(`docs/vnext/specs/VLN-006-ts-python-facade.md:6`). The local spec of the ticket
-(`specs/020-ts-python-facade/`) was written against a tree where the facade did not exist, and it
-records its own divergence: the `packages/core/src/worker/` module it designed landed as-built
-with a different shape, and the facade module it named (`packages/core/src/facade/`) never
-existed.
+(`docs/vnext/specs/VLN-006-ts-python-facade.md:6`). The local spec of the ticket, which lives
+outside the tracked tree under `specs/020-ts-python-facade/`, was written against a tree where
+the facade did not exist, and it records its own divergence: the `packages/core/src/worker/`
+module it designed landed as-built with a different shape, and the facade module it named
+(`packages/core/src/facade/`) never existed.
 
 Three facts decide the shape of the implementation:
 
@@ -59,7 +59,11 @@ legacy surface changes.** This implements VLN-006 as-built, over the worker clie
 6. The artifact is validated with the contract the repository already ships
    (`packages/core/src/adapter/embedding-manifest.ts`): the same schema and the same content
    digest the Python side covers, so the two languages refuse the same payloads and there is
-   exactly one address in the repository. The files are read through the resolved path and
+   exactly one address in the repository. The facade reaches that contract and NOTHING else of
+   the adapter: the commit of the artifact and the parity gate are the work of the adapter, not
+   of the application service over the worker, and the rule of the boundary proves it by
+   enumerating the modules of the adapter and refusing every one of them but the contract.
+   The files are read through the resolved path and
    opened with `O_NOFOLLOW`, so a worker that points its vectors at a file outside the approved
    root gets a refusal and not the bytes of that file. The reference the facade publishes is
    relative to the approved root and content addressed, the run id and the names of the manifest
@@ -102,7 +106,7 @@ legacy surface changes.** This implements VLN-006 as-built, over the worker clie
 - The facade routes one operation. `vision.predict` and the other codes of the wire stay
   unreachable from TypeScript until a ticket routes them.
 - The durable job queue is not here. The run record lives in the facade, the shipped job
-  vocabulary has six states and the shipped store has no jobs table, so the widening of the
+  vocabulary has seven states and the shipped store has no jobs table, so the widening of the
   vocabulary and the migration are a separate ticket with a numbered migration and a rollback.
 - The idempotency ledger is IN MEMORY: the key makes the work happen once WITHIN one process,
   and two invocations of the CLI are two runs. A durable key is a store table, which is the same
@@ -111,6 +115,10 @@ legacy surface changes.** This implements VLN-006 as-built, over the worker clie
   has no field for a digest or a path, and adding one is a breaking change of the contract
   surface. The address therefore lives in the result envelope, in the run record and in the
   output of the command, and the row that the store will accept carries the lineage.
+- No run wrote a row into a REAL store yet. The sink of the facade is exercised with a fake, and
+  the command that supplies the real one was never driven against a migrated database: the store
+  wants the lineage of the row to exist first, and a run that names assets and a snapshot that
+  the store does not know is refused with `REQUEST_INVALID`.
 - The effect tier of the registry entry is the one the pack uses and not the one the shipped
   code uses. The entry records the pack tier and the conflict instead of silently picking one.
 

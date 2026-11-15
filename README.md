@@ -213,6 +213,7 @@ variable that turns it on, and no process is started.
 | `VISIONLENS_WORKER_ASSET_ROOT` | The root the worker resolves the paths of the assets against. |
 | `VISIONLENS_WORKER_REGISTRY` | The registry of the models the worker may run. |
 | `VISIONLENS_WORKER_MODEL_ROOT` | The cache of the weights of the models. |
+| `VISION_LENS_WORKER_INTERPRETER` | The interpreter the worker is launched with. Default `python3`. |
 
 | Flag | Argument | Description | Default |
 |---|---|---|---|
