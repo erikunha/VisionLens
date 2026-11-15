@@ -181,7 +181,33 @@ a proposal that contradicts itself cannot be executed as it is written.
    the cells of `backlog.csv` and in the prose of the pack. The 12 specs that exist are template
    boilerplate and they do not carry the acceptance criteria of the rows.
 
-## 7. What the extension does not change
+## 7. The candidates against the frozen wire
+
+The folder `contracts-proposed/` holds seven candidate schemas. They are candidates and the pack
+says so, but their distance from the wire of the tree is worth measuring, because a candidate
+that is already a second wire is a candidate that will be copied.
+
+| Candidate of the pack | What the tree owns | The distance |
+|---|---|---|
+| `job-submit.v1.schema.json` | `packages/contracts/contracts/worker-request.v1.schema.json` | the candidate requires `operation`, `params` and `budget`; the frozen wire requires EIGHT fields: `protocol`, `kind`, `requestId`, `operation`, `contractVersion`, `workspaceId`, `params`, `budget`. The candidate drops five of them, and four of the five are what makes a request traceable and versioned |
+| `artifact-ref.v1.schema.json` | `packages/contracts/src/entities/derived-artifact.ts:24-34` | the candidate names `artifactId`, `mediaType`, `sha256`, `byteLength` and `accessTier`; the entity of the tree names `kind`, `sourceAssetIds` and `transform`. Two different shapes for the same word |
+| `capabilities.v1.schema.json` | `packages/core/src/facade/capabilities.ts:29` | the candidate is the HTTP envelope `{data, meta}`; the report of the tree is the worker level `FacadeWorkerCapabilities`. The endpoint that would serve it does not exist |
+| `problem-details.v1.schema.json` | `packages/contracts/src/worker/protocol.ts:97-118` | the candidate requires `code`, `requestId` and `retryable`, and that IS the vocabulary of the tree: the frozen `WorkerErrorCode` and the map `WORKER_ERROR_RETRYABLE`. Here the proposal does NOT fork the error vocabulary |
+| `job-resource.v1.schema.json`, `job-result.v1.schema.json` | `packages/contracts/src/entities/` | no job entity exists, so these two are additive; they land as Zod in the owner of the public entities |
+| `job-event.v1.schema.json` | `packages/contracts/src/worker/event.ts` | the candidate carries `jobId`, `seq` and `kind`; the event of the tree is the JSONL event of the frozen wire, and it is not a stream to reuse |
+
+Two controls that the extension assumes and the tree does not have:
+
+- the store has NO workspace column and NO ACL column
+  (`packages/core/src/store/migrations/0001_init.sql`), so the cross workspace read that the
+  ticket of the artifact download forbids (`VLSDK-024`) has no substrate to forbid, and the
+  ticket has to name the isolation model or to scope itself to the single user local case;
+- the publication is nowhere. The npm names of the extension return nothing on the registry,
+  the PyPI name returns nothing, the npm publish of this repository is disabled behind the
+  decision of the publishing identity (`.github/workflows/release.yml:64-76`) and the Python
+  workflow publishes nothing at all (`.github/workflows/python-package.yml:6-9`).
+
+## 8. What the extension does not change
 
 The extension is explicit that it does not supersede ADR-011 to ADR-018, that it does not change
 the persistence of `packages/core`, the outputs of `@vision-lens/contracts`, the snapshots, the
@@ -196,7 +222,7 @@ the bytes and the API owns the URLs.
 The five ADRs of the extension are PROPOSALS. None of them overrides ADR-011 to ADR-018, and
 none of them is accepted by the integration of the pack.
 
-## 8. What this report does not claim
+## 9. What this report does not claim
 
 - It does not claim that any SDK, any endpoint, any package or any wheel of the extension
   exists. None of them does, and the extension says so itself.
