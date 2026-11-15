@@ -24,8 +24,9 @@ build, and which contradict a decision the repository already took.
 
 Two deliveries are integrated in the repository:
 
-- the canonical package of 2026-11-11, at `docs/vnext/`, 64 files covered by
-  `docs/vnext/MANIFEST.sha256`, plus the drop-in handoff that the delivery of 2026-11-15 adds;
+- the canonical package, at `docs/vnext/`: 65 tracked files, 64 of them covered by
+  `docs/vnext/MANIFEST.sha256`. The manifest of 2026-11-11 covered 63 files; the delivery of
+  2026-11-15 adds the handoff and replaces the hashes of the README and of the full spec;
 - the Phase II extension of 2026-11-15, at `docs/vnext/extensions/computer-vision-2027/`, 19
   files covered by its own `MANIFEST-PHASE-II.sha256`.
 
@@ -33,6 +34,7 @@ Both manifests hold over the tree, and the validator of the pack reports zero er
 
 ```
 $ python3 docs/vnext/validation/validate_pack.py
+WARN: jsonschema unavailable; JSON schema validation not checked
 Files: 98 Manifest: 64 Errors: 0
 $ (cd docs/vnext && shasum -c MANIFEST.sha256 | grep -c ": OK")
 64
@@ -40,8 +42,13 @@ $ (cd docs/vnext/extensions/computer-vision-2027 && shasum -c MANIFEST-PHASE-II.
 19
 ```
 
-The canonical manifest does not change because of the extension: the pack covers its own files
-and the extension covers its own. The files were copied verbatim, and the only edit this
+The validator skips the JSON schema check when `jsonschema` is not installed, so this run
+verifies the manifest coverage and not the schema conformance of the pack.
+
+The extension adds no entry to the canonical manifest: the pack covers its own files and the
+extension covers its own. The canonical manifest moved only with the delivery of 2026-11-15,
+which added the handoff and replaced the hashes of the README and of the full spec. The files
+were copied verbatim, and the only edit this
 repository made to the delivered content is the one this report and the roadmap carry: the
 roadmap names the waves and the labs in the words of the repository.
 
@@ -97,7 +104,8 @@ What the repository has today, by the ticket of the canonical backlog
 What the extension finds here is a repository that already holds three of the four primitives
 its first wave needs: an encoder and its frozen artifact (VLN-005), a split with a fingerprint
 (VLN-007) and an evaluator with a regime gate (VLN-008). What it does NOT find is a second
-task, a second dataset, a licence registry for data and models, or a task-kind aware contract.
+task, a second dataset, a licence policy that covers the conflicting-rights case for data and
+models, or a task-kind aware contract.
 
 ## 4. Classification per ticket
 
@@ -161,10 +169,16 @@ extension.
    "MUST NOT be accepted in v1" (`packages/contracts/src/worker/protocol.ts:62`), and
    `experiment.compare` is not a code anywhere in the repository. The conflict is with the wire
    of v1, and the wire does not move without a major version.
-2. **The task kinds and the evaluator families do not line up.** The evaluator section names
-   `tracking` (HOTA and IDF1), `matting` and `medical-research`, and the proposed schema has
-   none of the three: it offers `image.ppe` and `video.counting`, which the evaluator section
-   never defines. An implementer cannot tell which family a pack belongs to.
+2. **The task kinds and the evaluator families do not line up.** The evaluator section names the
+   families `tracking` (HOTA and IDF1), `matting` and `medical-research`
+   (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:131-134`) and the
+   proposed schema names the kinds `video.counting`, `image.ppe`, `image.matting` and
+   `research.xray`
+   (`docs/vnext/extensions/computer-vision-2027/contracts-proposed/capability-pack.v0.schema.json:33-37`).
+   The coverage is the same and the names are not: no kind of the schema says `tracking`, and no
+   family of the evaluator says `image.ppe`, although the master spec scores PPE as a family of
+   its own (`docs/vnext/extensions/computer-vision-2027/MASTER-SPEC.md:121`). An implementer
+   cannot tell which family a pack belongs to.
 3. **`MISSING_EXTRA` is claimed not to exist** (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:80`) and it exists in
    the frozen vocabulary (`packages/contracts/src/worker/protocol.ts:86` and
    `python/visionlens/src/visionlens/errors.py`). The extension was written against a state of
@@ -195,10 +209,13 @@ The extension is explicit that it does not supersede ADR-011 to ADR-018, that it
 the persistence of `packages/core`, the outputs of `@vision-lens/contracts`, the snapshots, the
 major version of the JSONL wire, the compatibility of the exports of `@vision-lens/sdk`, the
 VisA data sets and the scripts (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:3`, `:35`). The rule of the
-evolution of a contract is the one the repository already follows and already states more
-strictly: a new discriminated variant with a version bump, the readers migrated BEFORE the
-persisted data of that type is written, and a field added only when no adequate field exists
-(`docs/vnext/07-CONTRACTS-PROTOCOL.md:5`).
+evolution of a contract is the one the extension states: a new discriminated variant with a
+version bump, the readers migrated BEFORE the persisted data of that type is written, and a field
+added only when no adequate field exists
+(`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:60`, `:101`). The rule of
+the repository is weaker and says only that a structural breaking change bumps the major and that
+an additional optional field may be a minor (`docs/vnext/07-CONTRACTS-PROTOCOL.md:72`), so the
+extension cannot lean on the repository to already say what it says.
 
 Nothing of the extension is a reason to change the owner map, the boundary table or the release
 gate of this repository. The seven items that the addendum says need an ADR before any code are
@@ -231,8 +248,11 @@ repository asks the same of everything else.
 - It does not claim that the datasets named by the extension may be downloaded. The extension
   says the opposite: none is downloaded, executed or redistributed, and the licences have to be
   reconfirmed at the acquisition review.
-- It does not claim a held-out accuracy. The VisA number of this repository is a regression
-  baseline over a leakage-resistant split, and the evaluation of the locked test partition is
-  still open.
+- It does not claim a held-out accuracy of the extension. The VisA number of this repository is a
+  regression baseline over a leakage-resistant split: the whole set of the 700 items reaches macro
+  F1 0.9734 (`docs/datasets/visa.md:799`) and the held-out figure of the 140 `test` items reaches
+  macro F1 0.9862 (`docs/datasets/visa.md:716`). The gate refuses to compare the two, because they
+  are two regimes. What is still open is the evaluation of the locked holdout of the probe
+  (`ROADMAP.md:216`).
 - It does not claim that the MPS arm of the canonical ticket is reachable. The build admits the
   CPU and only the CPU, and the trainer says so instead of running somewhere else.
