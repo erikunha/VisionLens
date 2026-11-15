@@ -262,13 +262,17 @@ class TrainRecipe:
         The fingerprint is the digest of this dictionary, so it is not part
         of what it digests. The TS side computes the digest over exactly
         this shape.
+
+        A partition is a SET of item ids, so the ids are sorted: the
+        address of a recipe is the address of the configuration and not of
+        the order the items were written in.
         """
         return {
             "recipeVersion": self.recipe_version,
             "encoder": self.encoder.to_dict(),
             "dataset": self.dataset.to_dict(),
             "partitions": {
-                name: list(ids) for name, ids in sorted(self.partitions.items())
+                name: sorted(ids) for name, ids in sorted(self.partitions.items())
             },
             "ontologyVersion": self.ontology_version,
             "classWeights": dict(sorted(self.class_weights.items())),

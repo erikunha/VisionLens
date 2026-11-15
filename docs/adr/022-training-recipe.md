@@ -74,7 +74,11 @@ of the tree recorded below.
    every field but the fingerprint itself. A recipe whose fingerprint is the
    digest of a name is a promise that nothing is pinned, and a fingerprint
    that changes when a single hyperparameter changes is the proof that it
-   covers the configuration and not a label of it.
+   covers the configuration and not a label of it. A partition is a SET of
+   item ids, so the ids are sorted before the digest: the address of a
+   recipe is the address of the configuration and not of the order the
+   items were written in, the same way the fingerprint of the partition is
+   the digest of the sorted pairs.
 3. The two sides compute the fingerprint with the SAME algorithm: the
    canonical serialisation of `packages/contracts/src/fingerprint.ts` and its
    Python mirror `visionlens/runtime/fingerprint.py`, which agree byte for

@@ -437,6 +437,27 @@ def test_a_model_whose_usage_restrictions_are_empty_is_pinned(
     assert recipe.encoder.usage_restrictions == ""
 
 
+def test_the_address_does_not_depend_on_the_order_of_the_items(tmp_path: Path) -> None:
+    """A partition is a set of ids, so the order they were written in is not
+    part of the configuration.
+
+    The fingerprint of the partition is the digest of the sorted pairs, so a
+    split whose items were written in another order is the same split, and
+    two runs of the same configuration share the address.
+    """
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    shuffled = copy.deepcopy(split)
+    shuffled["assignments"] = list(reversed(shuffled["assignments"]))
+    target = tmp_path / "shuffled.json"
+    target.write_text(json.dumps(shuffled), encoding="utf-8")
+
+    base = resolve_tracked()
+    other = resolve_tracked(split_path=str(target))
+
+    assert other.dataset.snapshot_fingerprint == base.dataset.snapshot_fingerprint
+    assert other.fingerprint == base.fingerprint
+
+
 def test_a_record_with_a_field_nobody_knows_is_refused() -> None:
     """A field nobody knows is refused, not dropped.
 
