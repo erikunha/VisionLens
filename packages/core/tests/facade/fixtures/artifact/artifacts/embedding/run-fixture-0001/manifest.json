@@ -1,0 +1,41 @@
+{
+  "artifactDigest": "771aadcbc610c566165d9b247627af460b05c3f6263fb5fc3c862b54f66dd117",
+  "assetSha256": [
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  ],
+  "calibrationStatus": "unknown",
+  "count": 2,
+  "createdAt": "2026-11-15T00:00:00+00:00",
+  "device": "cpu",
+  "dimension": 3,
+  "dtype": "float32",
+  "embeddingRunId": "run-fixture-0001",
+  "latency": {
+    "count": 2,
+    "p50Ms": 1.5,
+    "p95Ms": 2.0,
+    "totalMs": 3.5
+  },
+  "license": "apache-2.0",
+  "modelId": "siglip2-base",
+  "peakMemoryBytes": 123456,
+  "preprocessingComponents": {
+    "resample": 2,
+    "rescale": 0.00392156862745098,
+    "size": [
+      224,
+      224
+    ]
+  },
+  "preprocessingFingerprint": "fp2:83adc4ef99979644",
+  "revision": "75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2",
+  "runtimeVersions": {
+    "python": "3.12.0"
+  },
+  "schemaVersion": 1,
+  "snapshotId": "snapshot-fixture-0001",
+  "sourceUri": "file:///fixtures/images/red.jpg",
+  "vectorsFileDigest": "271f749e14d3dc899ca6d309646d0e78969f97cb9bf0b654cbfbd9cf02432374",
+  "weightsDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}
