@@ -187,3 +187,18 @@ revert, and nothing that existed before depends on them. The shape of the
 checkpoint may change while no run has been recorded with it, and the
 digest of a checkpoint that no run carries is not an address anybody
 depends on yet.
+
+## Amendment 2026-11-15: the trainer and the loader landed
+
+The trainer and the loader of the frozen features are not open anymore: the
+trainer of the M0 rung and the loader of the frozen feature artifact landed
+with `docs/adr/024-trainer-and-frozen-features.md`, and the trainer publishes
+the checkpoints this ADR describes. The probe fits a matrix the trainer reads
+now, and the checkpoint is published by a call the trainer makes.
+
+What this ADR decides does not move: the estimator is a scikit-learn logistic
+regression fitted inside the `training` extra, the class map is the authority
+of the class space, and the checkpoint is a JSON document addressed by its own
+digest. The resume and the cancel paths, the locked holdout evaluation, the
+arena comparison, the experiment record, the registration of the model
+version and the promotion gate are still open.
