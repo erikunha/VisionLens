@@ -72,7 +72,10 @@ and with the divergence of the tree recorded below.
    insufficient support instead of being lost in the fit. The probe refuses
    a class space class that the run does not train on, because a class
    without a single item has no coefficient and a class the model cannot
-   answer is a class the run never reports.
+   answer is a class the run never reports. The documented weight is
+   applied as it is: the probe does not second-guess the decision of the
+   operator, and the support of the class travels with the model, so a
+   report can see a class that was weighted with one item behind it.
 4. The HYPERPARAMETERS are a closed set. A hyperparameter nobody knows is
    refused, because a hyperparameter nobody applies is a decision nobody
    pinned. A hyperparameter that names the solver or the ceiling of the
@@ -97,8 +100,10 @@ and with the divergence of the tree recorded below.
 7. The PUBLICATION is atomic and it is ordered. The checkpoint file is
    written to a temporary name in the same directory, it is flushed to the
    disk, it is renamed to the name of its OWN DIGEST, and only then is the
-   manifest written and renamed into place. The manifest is the
-   publication: a checkpoint without a manifest is not published, a run
+   manifest written and renamed into place. The directory of the
+   publication is flushed as well, so the name of the artifact survives a
+   crash of the machine and not only the bytes of the file. The manifest
+   is the publication: a checkpoint without a manifest is not published, a run
    that dies in the middle leaves a file nobody points at, and a cancelled
    run publishes nothing. Two different checkpoints of one epoch are
    refused, because two runs are not one run
@@ -117,7 +122,18 @@ and with the divergence of the tree recorded below.
    a pickle would carry that JSON cannot. The `training` extra keeps the
    pin of joblib, because joblib is the reader of the frozen feature
    artifact, which is the next piece of the ticket.
-10. The `all` extra is the aggregate of the capability extras, so it
+10. The REFUSALS of the checkpoint speak the vocabulary of the checkpoint.
+    A payload that carries no model, a write that fails and a manifest
+    that names a file outside the directory of the run are refusals of the
+    checkpoint and not of the probe and not of the operating system: a
+    caller of the checkpoint catches one vocabulary and not the other. The
+    name of a checkpoint is a NAME and not a path, so a reader never hashes
+    a file the run never published.
+11. The rows of a model and the vectors of the run share one dimension, and
+    a model that does not say so is refused when it is read back. A model
+    whose rows are shorter than the dimension it declares answers with a
+    score computed over half of the vector.
+12. The `all` extra is the aggregate of the capability extras, so it
     carries the `training` extra from now on.
 
 ## Consequences
