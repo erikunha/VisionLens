@@ -160,7 +160,7 @@ the payload of a result to the operation: the result is free-form JSON but
 it must be stable per operation
 (`packages/contracts/src/worker/event.ts`). The bridge is where that
 stability is written down
-(`packages/core/src/worker/operations.ts:674`): for every operation it
+(`packages/core/src/worker/operations.ts:685`): for every operation it
 names the code, the params it sends, the typed success it accepts and the
 typed error it reports.
 
@@ -243,21 +243,65 @@ device it really used.
 The failure of the runtime is mapped onto the frozen wire vocabulary,
 and the mapping is written down because a refusal whose code is a guess
 is a refusal the caller cannot act on
-(`python/visionlens/src/visionlens/operations.py:261`):
+(`python/visionlens/src/visionlens/operations.py:279`):
 
 | what fails | the wire code |
 |---|---|
 | the extra is not installed | `MISSING_EXTRA` |
 | the device is not admitted | `UNSUPPORTED_PROTOCOL` |
-| the model is not in the registry, and the run embedded nothing | `MALFORMED_FRAME` |
-| the model refused the run, the registry cannot be read, the memory ran out | `WORKER_CRASHED` |
+| the model is not in the registry | `MALFORMED_FRAME` |
+| the run embedded nothing | `MALFORMED_FRAME` |
+| the model refused the run | `WORKER_CRASHED` |
+| the registry cannot be read, or it carries a record that cannot be read | `WORKER_CRASHED` |
+| the memory ran out | `WORKER_CRASHED` |
+| any other failure of the runtime | `WORKER_CRASHED` |
+| the run reached for the network | `PROVIDER_UNAVAILABLE` |
 
 The message of a refusal names the CONDITION and never the path, and the
 error samples of a run name the asset and the code of the refusal
 without the place of the asset on the disk: the logs and the traces of
 this platform record hashes and ids instead of the local paths of the
 user
-(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`). A run that
+embedded nothing names the CODE of each refusal in the message, because
+the code is what the caller acts on, and it names no path either.
+
+A failure of the RUNTIME is not a failure of the FRAME: the request was
+well formed and the adapter could not serve it. It is a failure of the
+worker and not a refusal of the caller, and the ten wire codes are the
+only vocabulary it may use.
+
+The failure of the runtime is also logged, with the CLASS of the failure
+and with the message of the refusal. The log carries no path, so the
+message of the library error never reaches it. The runtime itself names
+the condition with a REASON, a sentence that carries no path, so the
+refusal that crosses the wire names what broke without naming where.
+
+## The model of the worker
+
+The model of a recorded run is the weights AND the configuration of the
+model directory, and the runtime verifies both:
+
+- the adapter hashes the weights and compares the digest with the one the
+  record pins
+  (`python/visionlens/src/visionlens/encoders/siglip2.py:1`);
+- the runtime builds the preprocessing of the configuration and compares
+  its fingerprint with the one the record pins
+  (`python/visionlens/src/visionlens/io/preprocess.py:226`). A directory
+  whose configuration is another preprocessing is refused, and the run
+  that would have used it never happens.
+
+The model is built ONCE, even when two requests arrive at the same
+time. The worker serves a request in a thread of its own, and the model
+weighs more than a gigabyte: two of them do not fit in the memory of the
+machine. The lock of the adapter decides, and not the lock of the
+service, because the load of the model happens inside the adapter.
+
+The hello of the worker advertises the models it may serve: the
+placeholder models of the simulated runtime and, when the runtime of the
+recorded shape is configured, the models of the capability registry. A
+worker that serves a model nobody was told about is a worker that serves
+a surprise.
 
 The run reports its PROGRESS and asks for a CHECKPOINT between its
 steps, so a cancellation and a deadline keep their own code and stop a

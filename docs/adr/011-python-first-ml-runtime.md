@@ -312,29 +312,41 @@ model record, and the golden transcript of the package pinned that byte for byte
 measured, it was committed by the TypeScript side, and no caller could ask for it.
 
 **What changes.** The worker serves BOTH shapes, and the params of the request name the one it
-asks for (`python/visionlens/src/visionlens/operations.py:168`):
+asks for (`python/visionlens/src/visionlens/operations.py:172`):
 
 - an input that carries `images` asks for the simulated shape, and it is answered by exactly the
   code that answered it before;
 - an input that carries `assets` and a `snapshotId` asks for the recorded shape, and the CPU
   adapter answers it: the run id, the count, the dimension, the dtype, the digest of the artifact
   and the error samples, with the vectors on disk
-  (`python/visionlens/src/visionlens/inference/service.py:191`);
+  (`python/visionlens/src/visionlens/inference/service.py:207`);
 - a request that carries BOTH is refused before the worker is asked, because a request that claims
   two shapes asks for a run nobody can serve. A request that carries neither is refused too.
 
 The runtime is OPT IN. Four environment variables configure it: the registry of the records, the
 cache of the weights, the approved root of the assets and the root of the artifacts
-(`python/visionlens/src/visionlens/inference/service.py:386`). A worker that was not configured
+(`python/visionlens/src/visionlens/inference/service.py:460`). A worker that was not configured
 with them serves the simulated shape only and refuses the recorded one with a message that NAMES
 what is missing. The refusal is deliberate: a worker that quietly answered a recorded request with
 a simulation would be a worker that answered with something nobody asked for.
 
 The failure of the runtime is mapped onto the frozen wire vocabulary, and the ten wire codes stay
-exactly the ten they were (`python/visionlens/src/visionlens/operations.py:261`). The message of a
+exactly the ten they were (`python/visionlens/src/visionlens/operations.py:279`). The message of a
 refusal names the CONDITION and never the path, and so do the error samples of a run: the logs
 and the traces of this platform record hashes and ids instead of the local paths of the user
-(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+(`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`). A failure of the RUNTIME is not a failure
+of the FRAME: the request was well formed and the adapter could not serve it, so it is a failure
+of the worker and not a refusal of the caller.
+
+The model of a recorded run is the weights AND the configuration of the model directory, and the
+runtime verifies both: the adapter hashes the weights and compares the digest with the one the
+record pins, and the runtime compares the fingerprint of the preprocessing of the configuration
+with the one the record pins. A directory whose configuration describes another preprocessing is
+refused, and the run that would have used it never happens.
+
+The model is built ONCE, even when two requests arrive at the same time. The worker serves a
+request in a thread of its own, and the model weighs more than a gigabyte: two of them do not fit
+in the memory of the machine.
 
 **What does not change.** The frozen frames, the frozen vocabulary and the golden transcript do
 not move: the simulated shape is answered by the same code and the transcript is byte for byte
@@ -356,7 +368,7 @@ the channel and not from the CLI.
 | Python | three service skeletons as thin adapters (`SERVICE_NAME` only, no dependencies) | `services/vision/src/vision_lens_vision/__init__.py:3`, `services/vision/pyproject.toml:6` |
 | Python | the worker runtime container: the vendored wheel copy, no Node, byte-guarded | `docker/runtime/`, `scripts/check-docker-vendor.mjs:1` |
 | TypeScript | the worker host: spawn, framing, handshake, cancel ladder, deadline, budget | `packages/core/src/worker/client.ts:1` |
-| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:674` (the registry), `:407` (the typed success), `:444` (the typed error) |
+| TypeScript | the bridge: the operation registry, with the typed success and the typed error of every operation it knows | `packages/core/src/worker/operations.ts:685` (the registry), `:481` (the typed success), `:506` (the typed error) |
 | Shared | the frozen vocabulary, defined once per language and proven identical | `packages/contracts/src/worker/protocol.ts:19`, `python/visionlens/src/visionlens/protocol.py:18` |
 | Cross-language | the real TypeScript host against the real Python worker over the wire | `packages/core/tests/worker/python-integration.test.ts:21-34` |
 

@@ -20,7 +20,8 @@ amendment of 2026-11-14 of `docs/adr/011-python-first-ml-runtime.md`.
 | torch / transformers / Pillow / safetensors | 2.15.0 / 4.57.6 / 13.0.0 / 0.8.0 |
 | the branch | `feat/r1-vision-runtime` (the sections 6.1 to 6.7), `feat/r1-ts-python-facade` (the section 6.8) |
 | the base | `origin/main` at `5d8c1de` (the sections 6.1 to 6.7), `4d5fb82` (the section 6.8) |
-| the tree | `ffc0fa76494458eb39057e14f22e948d470d9b59` (the sections 6.1 to 6.7), `c3fb246e44aa49ee9979effca96046780e459094` (the section 6.8) |
+| the commit | `ffc0fa76494458eb39057e14f22e948d470d9b59` (the sections 6.1 to 6.7), `8f44bbb5b9f3338359a41e1c0417847867b90e5c` (the section 6.8) |
+| the tree | `c2ec66aa78043cd3e15e8eaede4905e2b3229b94` (the tree of the commit above), `c3fb246e44aa49ee9979effca96046780e459094` (the tree of the commit above) |
 | the date | 2026-11-14 |
 
 The commands below were run from the root of a worktree of the repository, and the Python ones
@@ -326,10 +327,12 @@ images: 6
 count: 6
 dimensions: 768
 dtype: float32
-embedding run id: embed-b87b292b54134e1b900c36b8414fe8d9
+embedding run id: embed-ea8f8f2d37a2478dbdf6e2154b5fe78a
 artifact digest: 4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a
 error samples: 0
 progress frames: 2
+progress: 0 of 6
+progress: 6 of 6
 vectors digest of the set: 33cf54e30375a47dd703e25cbc1369b441ceffc911ba8c5fac2950966a12670c
 the run is green: the worker answered the recorded shape over the channel, the artifact on disk carries the digest the frame names, and the vectors are the golden ones
 ```
@@ -343,7 +346,12 @@ What the output proves, row by row:
   the SAME content address the run over the library produced in 6.1. Two different paths, one
   content;
 - the vectors of this run are the vectors of the committed golden set, digest for digest;
-- the run reported its progress: two progress frames, the first at zero and the last at six.
+- the run reported its progress: two progress frames, the first at zero of six and the last at
+  six of six.
+
+The run id of the block above is the id of THAT run and not a fact anybody can reproduce: the
+id is a uuid, so two runs of the same content carry different run ids and the SAME content
+address. The address is the reproducible part of a run.
 
 The TypeScript side is proven against the same real worker, with the same real model and the
 same committed fixtures, by the suite of the bridge
@@ -383,9 +391,9 @@ returned.
 
 | Gate | Command | Exit |
 |---|---|---|
-| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (446 passed and 1 skipped without the `vision` extra; 447 passed with it) |
+| Python suite | `cd python/visionlens && uv run --group dev pytest tests -q` | 0 (448 passed and 1 skipped without the `vision` extra; 449 passed with it) |
 | Python types | `cd python/visionlens && uv run --group dev --extra vision --locked mypy src/visionlens` | 0 (37 files, no issues) |
-| Node suite | `pnpm exec vitest run` | 0 (111 files, 1312 passed, 3 skipped) |
+| Node suite | `pnpm exec vitest run` | 0 (111 files, 1314 passed, 3 skipped) |
 | Lint | `pnpm run lint` | 0 |
 | Type check | `pnpm run typecheck` | 0 (9 of 9 tasks) |
 | Boundary check | `pnpm run check:boundaries` | 0 |
@@ -395,3 +403,24 @@ returned.
 | Vision parity | `pnpm exec tsx scripts/benchmarks/vision-parity.ts` | 0 (3 tiers) |
 | Registry parity | `pnpm exec tsx scripts/registry/parity-check.ts` | 0 (257 cases, 0 disagreements) |
 | The recorded run over the channel | `cd python/visionlens && uv run --extra vision --group dev python scripts/verify_worker_embed.py` | 0 |
+
+## 6.10 The review of the increment over the channel
+
+The increment of the section 6.8 went through an orchestrated review with FOUR specialist tracks,
+each one a falsifiable question and each one a fresh reviewer that did not write the change: the
+routing and the refusals of the worker, the security of the recorded run, the agreement of the
+two languages and the truth of the documents. The findings that survived the reproduction were
+fixed at their cause, with a guard that fails when the defect comes back.
+
+| what the review found | how it was fixed |
+|---|---|
+| the runtime built the preprocessing of the model directory WITHOUT comparing it with the fingerprint the record pins, so a directory with another configuration was run | the runtime builds the specification with the guard of the library (`spec_of_record`) and refuses the directory whose configuration is another preprocessing; the guard is a test of its own (`test_a_preprocessing_that_the_record_does_not_pin_is_refused`) |
+| two requests that arrived at the same time built the MODEL twice, and the model weighs more than a gigabyte | the adapter loads the model under a lock of its own, and the guard is a test that fails with two builds when the lock is removed (`test_two_runs_at_the_same_time_build_the_model_once`) |
+| the refusal of a run that embedded nothing lost the CODES of the refusals | the message names the code of every refusal, and it names no path |
+| a failure of the runtime that was not mapped was reported as `MALFORMED_FRAME`, which blames the frame of a request that was well formed | the remaining failures of the runtime are `WORKER_CRASHED`, and a refusal of the network is `PROVIDER_UNAVAILABLE` |
+| the message of a refusal pointed at the stderr log, and the log carried nothing | the failure of the runtime is logged with its class and with the message of the refusal, and the message carries no path |
+| the recorded entry points of the TypeScript bridge did not refuse a request that names both shapes | the recorded entry points build their params through the bridge, and the guard is a test of its own |
+| a recorded input with no assets at all became a RETRYABLE crash of the worker | the builder refuses the field by name, and the refusal is a contract refusal and not a crash |
+| the release gate refused the distribution: the new test carried a literal path of a machine | the test carries a path that is not the path of a machine, and the gate is green |
+| the table of the ADR carried two stale citations of the TypeScript bridge | the citations were recalculated and checked against the tree |
+| the environment table of this record mixed a commit and a tree under one row | the commit and the tree have a row each |
