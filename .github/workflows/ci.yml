@@ -116,7 +116,7 @@ jobs:
       - name: Build (required by the golden bin tests)
         run: pnpm build
 
-      - name: Golden bin tests (vision-lens + ai-image-labeling compat)
+      - name: Golden bin tests (vision-lens)
         run: pnpm --filter @vision-lens/cli test:bins
 
       # removed: README flags-table check (`pnpm readme:check`) — README moved to

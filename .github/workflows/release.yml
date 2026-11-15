@@ -65,11 +65,10 @@ jobs:
       # pending the publishing-identity decision (spec 001).
       # - packages/cli is currently named @vision-lens/cli with private:true
       #   — no workspace package is publishable as-is.
-      # - npm continuity for the published name "ai-image-labeling" requires
-      #   renaming packages/cli to that name when the identity is decided; the
-      #   rename is breaking and must land inside the spec 001 US2 deprecation
-      #   window (two minor versions of the `ai-image-labeling` compat bin,
-      #   documented in README + CHANGELOG).
+      # - The publishing identity is not decided yet: it needs the registry
+      #   check of the chosen scope and name, and the decision may rename
+      #   packages/cli. When it does, the rename is breaking and lands with
+      #   the release notes of that rename.
       # When decided, restore the publish step (and re-add id-token: write to
       # the job permissions for npm provenance):
       #
