@@ -1,7 +1,7 @@
 {
   "name": "@vision-lens/core",
   "version": "0.0.1",
-  "description": "Vision Lens core: pipeline, providers, domain services (evolved from the legacy `ai-image-labeling` package).",
+  "description": "Vision Lens core: pipeline, providers, domain services (evolved from the legacy single-package CLI).",
   "type": "module",
   "main": "./dist/index.js",
   "exports": {

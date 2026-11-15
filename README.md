@@ -5,22 +5,21 @@ AI-powered image classification, timestamp overlay, and sequential organization 
 [![CI](https://github.com/erikunha/VisionLens/actions/workflows/ci.yml/badge.svg)](https://github.com/erikunha/VisionLens/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-> **Vision Lens evolution in progress** — this CLI is growing into a Visual Intelligence
-> Engineering Workbench (repo `erikunha/VisionLens`, renamed from `LAIbemage`): real-dataset benchmarks, visual
+> **Vision Lens evolution in progress.** This CLI is growing into a Visual Intelligence
+> Engineering Workbench (repo `erikunha/VisionLens`): real-dataset benchmarks, visual
 > embeddings and search, model training/evaluation with calibration, a Studio review UI, HTTP API
-> and an MCP server (ADR-005). The legacy `ai-image-labeling` CLI keeps working unchanged
-> throughout. See `docs/architecture/vision-lens.md`, `docs/architecture/baseline-audit.md` and
-> `ROADMAP.md`; work lands on the `feat/visual-lens` branch.
+> and an MCP server (ADR-005). See `docs/architecture/vision-lens.md`,
+> `docs/architecture/baseline-audit.md` and `ROADMAP.md`; work lands on the `feat/visual-lens`
+> branch.
 >
-> **Binary names:** `vision-lens` is the canonical bin (`pnpm add -g @vision-lens/cli` → `vision-lens`).
-> The legacy `ai-image-labeling` bin is kept inside the CLI package as a compatibility alias that
-> points at `vision-lens` — it prints one stderr deprecation line per run, silenced with
-> `VISION_LENS_NO_DEPRECATION=1`. See CHANGELOG.md.
+> **Binary name:** `vision-lens` is the only bin. The CLI package is not published yet, so the
+> bin comes from a clone: `pnpm build` and then `node packages/cli/dist/index.js`. The
+> compatibility alias of the earlier name is gone: it pointed at the same program, it was
+> never published, and a bin nobody installs is a bin nobody keeps. See CHANGELOG.md.
 >
 > **npm packages:** the new identity publishes from the `@vision-lens` scope (`@vision-lens/cli`,
-> `@vision-lens/sdk`, …). Those workspace packages are **not published yet** — until they are,
-> install from a clone (see [Development](#development)). The `ai-image-labeling` bin is kept inside
-> the CLI package as a deprecated alias that points at `vision-lens`.
+> `@vision-lens/sdk`, …). Those workspace packages are **not published yet**, so until they are,
+> install from a clone (see [Development](#development)).
 >
 > **Decisions:** the architecture decision records live in [`docs/adr/`](docs/adr/) (ADR-005+ cover
 > the Vision Lens evolution).
@@ -542,8 +541,7 @@ await runBatch(config);
 packages/
   core/             Domain logic: config, analyzer, processor, classifier, reviewer,
                     reporter, plugin, search, benchmark, store, fs
-  cli/              Commander.js CLI — the `vision-lens` bin plus the deprecated
-                    `ai-image-labeling` compatibility bin
+  cli/              Commander.js CLI: the `vision-lens` bin
   sdk/              Public TypeScript SDK (@vision-lens/sdk)
   contracts/        Zod domain entities and the OpenAPI seed
 apps/

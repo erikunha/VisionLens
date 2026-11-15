@@ -1,14 +1,13 @@
 {
   "name": "@vision-lens/cli",
   "version": "0.0.1",
-  "description": "Vision Lens CLI: canonical `vision-lens` bin plus the deprecated `ai-image-labeling` compatibility bin (spec 001 US2).",
+  "description": "Vision Lens CLI: the canonical `vision-lens` bin (spec 001 US2).",
   "type": "module",
   "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "vision-lens": "./dist/index.js",
-    "ai-image-labeling": "./dist/compat.js"
+    "vision-lens": "./dist/index.js"
   },
   "engines": {
     "node": ">=20"

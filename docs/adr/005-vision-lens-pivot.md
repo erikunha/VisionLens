@@ -5,12 +5,12 @@
 | Status   | Accepted                |
 | Date     | 2026-11-10              |
 | Deciders | @erikunha |
-| Supersedes | `ROADMAP.md` "Historical record — v2.0" → the superseded row `"No GUI / no HTTP server" (ROADMAP 2026-05: "What we are not building")` (ROADMAP.md:57); the live exclusion list is "What we are not building (current)" (ROADMAP.md:147-155), which no longer carries the GUI / HTTP-server exclusions |
+| Supersedes | `ROADMAP.md` "Historical record: v2.0 (the legacy CLI)" → the superseded row `"No GUI / no HTTP server" (ROADMAP 2026-05: "What we are not building")` (ROADMAP.md:58); the live exclusion list is "What we are not building (current)" (ROADMAP.md:235-243), which no longer carries the GUI / HTTP-server exclusions |
 
 ## Context
 
 The project (product name for the evolution: **Vision Lens**; repository
-`erikunha/LAIbemage`, whose CLI bin was named `ai-image-labeling` before the rename) is a
+`erikunha/VisionLens`) is a
 feature-complete v2.0 CLI: seven vision-LLM providers, hybrid local/cloud routing, consensus,
 temporal sessions, text embeddings with keyword/semantic search, a plugin system, a TypeScript
 SDK and 361 green tests over a ports-and-adapters architecture. The 2026-05 roadmap closed with an
@@ -37,8 +37,7 @@ Workbench**: a local-first platform
 combining visual data engineering, multimodal intelligence (visual embeddings first,
 classification, detection/segmentation later), training and experimentation, evaluation and
 optimization (empirical calibration, Pareto quality/cost/latency), human-in-the-loop review,
-agent-assisted investigation, and four equivalent surfaces — CLI (`vision-lens`, with
-`ai-image-labeling` kept as a compatibility alias inside the CLI package), HTTP API,
+agent-assisted investigation, and four equivalent surfaces: CLI (`vision-lens`), HTTP API,
 Studio, and an MCP server.
 
 Delivery is phased (F0–F5), each phase ending in a demonstrable end-to-end slice:
@@ -78,9 +77,6 @@ schema — domain meaning belongs to the versioned ontology (spec 002).
   as `packages/core` — the pivot preserves the strongest prior investment instead of rewriting it.
 - Review, calibration and cost loops finally have UI and API surfaces, closing the data
   flywheel the CLI alone could only half-run.
-- CLI compatibility (`ai-image-labeling` bin, kept inside the CLI package as a compatibility
-  alias) keeps source installs and scripts working through a documented deprecation window
-  (spec 001).
 
 **Negative:**
 
@@ -90,3 +86,15 @@ schema — domain meaning belongs to the versioned ontology (spec 002).
   bounded by ADR-006.
 - The old "not building" table becomes historical: every future exclusion must now be argued
   on its own evidence, not quoted.
+
+## Amendment 2026-11-15: the CLI ships one bin
+
+The surfaces this ADR named carry one bin each now. The `vision-lens` bin is canonical and
+the alias of the earlier bin name is gone: it pointed at the same program, the CLI package
+was `private: true` and was never published to npm, and no published consumer depended on
+it. The CLI compatibility that this ADR promised is therefore the canonical bin itself, and
+the four equivalent surfaces are unchanged: CLI, HTTP API, Studio and MCP server.
+
+Nothing else of this ADR moves. The rename of the product, the repository, the npm scope and
+the environment prefix, and the decision that the pack under `docs/vnext/` is integrated
+verbatim, are untouched.

@@ -63,7 +63,7 @@ terminal fails. Every command in this guide is a plain single command that runs 
 | `pnpm run test:coverage` | Vitest with V8 coverage report |
 | `pnpm run check:boundaries` | Proves the LLM-SDK boundary rule fires (ESLint `no-restricted-imports`) |
 | `pnpm run test:py` | pytest for the Python services in `services/` |
-| `pnpm --filter @vision-lens/cli test:bins` | Golden bin tests for `vision-lens` and the `ai-image-labeling` compat bin |
+| `pnpm --filter @vision-lens/cli test:bins` | Golden bin test for the `vision-lens` bin |
 | `pnpm run fixtures` | Regenerate test fixture images |
 | `pnpm run check` | lint + typecheck + test:coverage (the full gate) |
 

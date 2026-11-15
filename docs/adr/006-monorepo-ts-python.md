@@ -28,7 +28,7 @@ and Python ML services, glued by versioned contracts:
 apps/studio          Next.js (spec 010)
 apps/api             Fastify HTTP API (spec 009)
 packages/core        existing pipeline + data/al/release domain (from src/)
-packages/cli         `vision-lens` + `ai-image-labeling` compat bin (spec 001)
+packages/cli         `vision-lens` bin (spec 001)
 packages/sdk         stable re-export surface (from src/sdk.ts)
 packages/contracts   Zod schemas, JSON Schemas, OpenAPI — single truth (spec 002)
 packages/mcp         MCP server (spec 011)
@@ -78,3 +78,11 @@ would multiply config without changing the import graph (constitution IX).
 - Turbo adds a caching layer that must be configured honestly (no cache across incompatible
   lockfiles).
 - Fine-grained packaging temptation; the boundary table and review discipline are the guard.
+
+## Amendment 2026-11-15: the CLI package ships one bin
+
+The package map above named two bins of `@vision-lens/cli`. The canonical `vision-lens` bin
+stays and the alias of the earlier bin name is gone: the package was `private: true` and was
+never published to npm, so no published consumer depended on it. The rest of this ADR is
+untouched: the split between the TypeScript core and the Python services, the contracts-first
+rule and the boundary table are exactly as they were.

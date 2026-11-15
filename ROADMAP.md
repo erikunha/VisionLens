@@ -39,7 +39,7 @@ report (quality × cost × latency) → same investigation via agent over MCP.
 
 ---
 
-## Historical record — v2.0 (legacy `ai-image-labeling` CLI)
+## Historical record: v2.0 (the legacy CLI)
 
 Feature-complete and shipped (2024-01 → 2026-08). Preserved as `packages/core`/`cli`/`sdk`
 (spec 001). Highlights: H1 cost & reliability (async batches, prompt caching, structured
@@ -80,7 +80,7 @@ Superseded by Vision Lens decisions:
 
 ### F0 — Foundation (specs 001–003)
 
-- Monorepo (pnpm + Turborepo), `vision-lens` CLI + `ai-image-labeling` compat alias, CI fast gate,
+- Monorepo (pnpm + Turborepo), `vision-lens` CLI, CI fast gate,
   AGENTS boundary table for package layout — **zero behavior change, 361 tests green
   throughout** (001).
 - Domain model + `packages/contracts` (14 entities, Zod, OpenAPI), SQLite store,

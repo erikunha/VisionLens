@@ -34,7 +34,7 @@ The static proof of the rules in this map is `pnpm run check:owner-boundaries`
 | Store, lineage, migrations | `packages/core/src/store/` | stays in TypeScript, sole domain writer | `packages/core/src/store/db.ts:1`, `lineage.ts`, `migrations/` | `docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:46` |
 | LLM Vision providers | `packages/core/src/analyzer/providers/` | stays in TypeScript until contract parity and profiling justify moving it | `AGENTS.md:85` | `docs/vnext/02-ARCHITECTURE-DECISION.md:9` |
 | Image preprocessing pipeline (Sharp) | `packages/core/src/processor/` | stays in TypeScript until parity and profiling justify moving it | `AGENTS.md:89` | `docs/vnext/02-ARCHITECTURE-DECISION.md:9` |
-| Node CLI bins | `packages/cli/` | stays in TypeScript, `vision-lens` canonical | `packages/cli/package.json:10-11` | `docs/vnext/02-ARCHITECTURE-DECISION.md:30` |
+| Node CLI bin | `packages/cli/` | stays in TypeScript, `vision-lens` is the only bin | `packages/cli/package.json:9-11` | `docs/adr/011-python-first-ml-runtime.md:398` |
 | npm SDK | `packages/sdk/` | stays in TypeScript | `packages/sdk/package.json:7-9` | `docs/vnext/02-ARCHITECTURE-DECISION.md:31` |
 | Application API and Studio apps | `apps/` | stays in TypeScript | `docs/architecture/monorepo-map.md` (layout) | `docs/vnext/04-ARCHITECTURE-C4.md:12` |
 | Python services (`vision`, `training`, `agents`) | `services/` | thin adapters, stdlib-only skeletons | `services/vision/src/vision_lens_vision/__init__.py:3` | `docs/vnext/02-ARCHITECTURE-DECISION.md:33`, `docs/vnext/05-PYTHON-CORE-AND-PYPI.md:5` |

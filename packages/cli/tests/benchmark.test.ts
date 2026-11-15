@@ -54,7 +54,6 @@ function runBin(args: string[]): BinResult {
     // The CLI reads the repository files by their repository-relative paths,
     // so it is spawned from the repository root.
     cwd: REPO_ROOT,
-    env: { ...process.env, VISION_LENS_NO_DEPRECATION: '1' },
   });
   expect(result.error).toBeUndefined();
   return {

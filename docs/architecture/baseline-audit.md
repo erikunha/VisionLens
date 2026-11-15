@@ -6,7 +6,7 @@
 
 ## Product baseline
 
-Single TypeScript ESM package `ai-image-labeling` v0.0.1 (bin → `dist/cli/index.js`),
+Single TypeScript ESM package (the CLI of the pre-rename repository) v0.0.1 (bin → `dist/cli/index.js`),
 ~7,890 LOC across 67 files; Node ≥ 18, pnpm@11. Test baseline (executed 2026-11-10):
 **361 passed, 3 skipped, 33 files, 4.86s, exit 0** (`pnpm test` = `vitest run`, fixtures via
 pretest hook).

@@ -26,7 +26,7 @@ Three facts decide the shape of the implementation:
   manifest and commit one row, and it has to do it through the repository, never through a
   database handle.
 - The legacy surface is frozen: the provider vocabulary, the export lists of `@vision-lens/core`
-  and `@vision-lens/sdk`, the two bins and every flag of the root command.
+  and `@vision-lens/sdk`, the CLI bin and every flag of the root command.
 
 The route is the sharp edge of the ticket. A facade that decides on its own whether Python is
 installed is a silent provider change, which is exactly what the ticket forbids. A facade that
