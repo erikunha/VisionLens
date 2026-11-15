@@ -1,7 +1,12 @@
 import { createHash } from 'node:crypto';
-import { readFile, realpath } from 'node:fs/promises';
+import { constants, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { CONTRACTS_VERSION, canonicalJson, fingerprintV2 } from '@vision-lens/contracts';
+import { CONTRACTS_VERSION, fingerprintV2 } from '@vision-lens/contracts';
+import {
+  EMBEDDING_CONTENT_FIELDS,
+  embeddingContentDigest,
+  validateEmbeddingManifest,
+} from '../adapter/embedding-manifest.js';
 import { FacadeError } from './errors.js';
 
 /**
@@ -57,25 +62,13 @@ export const FACADE_MANIFEST_FILE = 'manifest.json';
 /**
  * The fields the artifact digest covers.
  *
- * The list is the one of the Python side
- * (`python/visionlens/src/visionlens/inference/artifact.py:52`): the content
- * of the run, and nothing that describes the run itself.
+ * The list is NOT a second list: it is the one the repository already ships
+ * (`packages/core/src/adapter/embedding-manifest.ts:95`), which is the one
+ * the Python side covers as well. A digest that covers another set of fields
+ * is another address, so there is exactly one list in the repository and the
+ * facade points at it.
  */
-export const FACADE_ARTIFACT_CONTENT_FIELDS = [
-  'schemaVersion',
-  'modelId',
-  'revision',
-  'sourceUri',
-  'weightsDigest',
-  'preprocessingFingerprint',
-  'preprocessingComponents',
-  'snapshotId',
-  'assetSha256',
-  'count',
-  'dimension',
-  'dtype',
-  'vectorsFileDigest',
-] as const;
+export const FACADE_ARTIFACT_CONTENT_FIELDS = EMBEDDING_CONTENT_FIELDS;
 
 /** A reference to an artifact: relative, content addressed, never absolute. */
 export interface FacadeArtifactReference {
@@ -128,14 +121,25 @@ export interface FacadeArtifactClaim {
   readonly dimensions: number;
   /** The dtype the worker declared. */
   readonly dtype: string;
+  /**
+   * The digests of the assets the run was supposed to embed.
+   *
+   * The check is OPTIONAL because the digests are the sha256 of the bytes of
+   * the assets, and the facade can only compute them when it knows the root
+   * the worker resolves the paths against. When the digests are known, the
+   * manifest must name exactly those assets: a run that embedded other
+   * images is not the run that was asked for.
+   */
+  readonly expectedAssetDigests?: readonly string[];
 }
 
 /**
  * The relative path of the artifact of a run.
  *
  * The run id comes from the wire, so it is NOT trusted: an id that carries a
- * separator or a parent reference is refused here, before any path is
- * resolved. The layout is the one of the store
+ * separator, a parent reference, a control character or anything outside the
+ * bounded alphabet is refused here, before any path is resolved. The layout
+ * is the one of the store
  * (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:35`).
  */
 export function artifactRelativePath(embeddingRunId: string): string {
@@ -145,26 +149,26 @@ export function artifactRelativePath(embeddingRunId: string): string {
       'the result of the run carries no embeddingRunId, and the artifact has no name without it',
     );
   }
-  if (embeddingRunId.includes('\0')) {
+  if (!FACADE_RUN_ID_PATTERN.test(embeddingRunId)) {
     throw new FacadeError(
       'ARTIFACT_INVALID',
-      'the embeddingRunId of the run carries a null byte',
-    );
-  }
-  if (embeddingRunId.includes('/') || embeddingRunId.includes('\\')) {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the embeddingRunId "${embeddingRunId}" carries a path separator, and an id names a directory without being a path`,
-    );
-  }
-  if (embeddingRunId === '.' || embeddingRunId === '..') {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the embeddingRunId "${embeddingRunId}" is a parent reference`,
+      `the embeddingRunId "${embeddingRunId}" is not a bounded name, and a name that reaches a path or a log must carry only letters, digits, dots, dashes and underscores`,
     );
   }
   return `artifacts/${FACADE_ARTIFACT_KIND}/${embeddingRunId}`;
 }
+
+/**
+ * The bounded alphabet of a run id.
+ *
+ * The id must START with a letter or a digit: an id that starts with a dot
+ * could be `.` or `..`, and a name that names a directory must not be a
+ * parent reference.
+ */
+const FACADE_RUN_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** The bounded alphabet of the model id and of the revision of a manifest. */
+const FACADE_MODEL_FIELD_PATTERN = /^[A-Za-z0-9._:@-]{1,64}$/;
 
 /**
  * Resolves the directory of an artifact against the approved root.
@@ -176,11 +180,14 @@ export function artifactRelativePath(embeddingRunId: string): string {
  *    which refuses a symlink that escapes;
  *  - the directory exists, because an artifact that is not there is not an
  *    artifact.
+ *
+ * The directory that comes back is the REAL one, so the files under it are
+ * opened through resolved paths and not through the names the caller used.
  */
 async function resolveArtifactDirectory(
   artifactRoot: string,
   relativePath: string,
-): Promise<string> {
+): Promise<{ root: string; target: string }> {
   if (typeof artifactRoot !== 'string' || artifactRoot.trim().length === 0) {
     throw new FacadeError(
       'ARTIFACT_INVALID',
@@ -216,7 +223,67 @@ async function resolveArtifactDirectory(
       `the artifact "${relativePath}" leaves the approved artifact root through a link`,
     );
   }
-  return target;
+  return { root: realRoot, target: realTarget };
+}
+
+/**
+ * Reads one file of an artifact, refusing a file that is a link.
+ *
+ * The file is opened with `O_NOFOLLOW`, so a symlink placed where the file
+ * is expected fails the open instead of being followed: a worker that
+ * points its vectors at a file outside the approved root gets a refusal and
+ * not the bytes of that file. The path handed here is the RESOLVED one, so
+ * no component of it is a link either.
+ */
+async function readArtifactFile(path: string, what: string, relativePath: string): Promise<Buffer> {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the ${what} of "${relativePath}" is not a regular file under the approved artifact root`,
+    );
+  }
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) {
+      throw new FacadeError(
+        'ARTIFACT_INVALID',
+        `the ${what} of "${relativePath}" is not a regular file under the approved artifact root`,
+      );
+    }
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Reads the manifest of an artifact and refuses a shape that is not a JSON
+ * object.
+ */
+async function readManifest(
+  path: string,
+  relativePath: string,
+): Promise<Record<string, unknown>> {
+  const raw = (await readArtifactFile(path, 'manifest', relativePath)).toString('utf8');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" is not valid JSON`,
+    );
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" is not a JSON object`,
+    );
+  }
+  return parsed as Record<string, unknown>;
 }
 
 /**
@@ -235,9 +302,34 @@ export async function validateEmbeddingArtifact(
   claim: FacadeArtifactClaim,
 ): Promise<FacadeValidatedArtifact> {
   const relativePath = artifactRelativePath(claim.embeddingRunId);
-  const directory = await resolveArtifactDirectory(claim.artifactRoot, relativePath);
+  const { target: directory } = await resolveArtifactDirectory(claim.artifactRoot, relativePath);
 
-  const manifest = await readManifest(join(directory, FACADE_MANIFEST_FILE), relativePath);
+  const raw = await readManifest(join(directory, FACADE_MANIFEST_FILE), relativePath);
+
+  // The manifest is validated with the schema the repository already ships
+  // (`packages/core/src/adapter/embedding-manifest.ts:150`), the same one
+  // the Python side validates against: the two languages have to refuse the
+  // same payloads, and a second validator in the facade would refuse a
+  // different set.
+  const validation = validateEmbeddingManifest(raw);
+  if (!validation.ok) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" is not a valid manifest: ${validation.issues.join('; ')}`,
+    );
+  }
+  const manifest = validation.manifest as unknown as Record<string, unknown>;
+
+  // The manifest names the run it belongs to, and the name must be the one
+  // the run claimed: a manifest that names another run is a manifest of
+  // another artifact.
+  const manifestRunId = manifest['embeddingRunId'];
+  if (manifestRunId !== claim.embeddingRunId) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" names the run ${String(manifestRunId)} while the run claimed ${claim.embeddingRunId}`,
+    );
+  }
 
   const declared = manifest['artifactDigest'];
   if (typeof declared !== 'string' || !/^[0-9a-f]{64}$/.test(declared)) {
@@ -271,6 +363,10 @@ export async function validateEmbeddingArtifact(
     );
   }
 
+  if (claim.expectedAssetDigests !== undefined) {
+    requireSameAssets(manifest, claim.expectedAssetDigests, relativePath);
+  }
+
   const vectorsDigest = manifest['vectorsFileDigest'];
   if (typeof vectorsDigest !== 'string' || !/^[0-9a-f]{64}$/.test(vectorsDigest)) {
     throw new FacadeError(
@@ -279,12 +375,11 @@ export async function validateEmbeddingArtifact(
     );
   }
 
-  const vectors = await readFile(join(directory, FACADE_VECTORS_FILE)).catch(() => {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the vectors of "${relativePath}" are not on disk under the approved artifact root`,
-    );
-  });
+  const vectors = await readArtifactFile(
+    join(directory, FACADE_VECTORS_FILE),
+    'vectors',
+    relativePath,
+  );
   const actual = createHash('sha256').update(vectors).digest('hex');
   if (actual !== vectorsDigest) {
     throw new FacadeError(
@@ -309,8 +404,8 @@ export async function validateEmbeddingArtifact(
       bytes: vectors.byteLength,
     },
     transform: {
-      modelId: requireString(manifest, 'modelId', relativePath),
-      revision: requireString(manifest, 'revision', relativePath),
+      modelId: requireBoundedString(manifest, 'modelId', relativePath),
+      revision: requireBoundedString(manifest, 'revision', relativePath),
       preprocessingFingerprint: requireString(
         manifest,
         'preprocessingFingerprint',
@@ -355,41 +450,16 @@ export function transformFingerprintOf(
   });
 }
 
-/** Reads the manifest of an artifact and refuses a shape that is not a JSON object. */
-async function readManifest(path: string, relativePath: string): Promise<Record<string, unknown>> {
-  const raw = await readFile(path, 'utf-8').catch(() => {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the manifest of "${relativePath}" is not on disk under the approved artifact root`,
-    );
-  });
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the manifest of "${relativePath}" is not valid JSON`,
-    );
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw new FacadeError(
-      'ARTIFACT_INVALID',
-      `the manifest of "${relativePath}" is not a JSON object`,
-    );
-  }
-  return parsed as Record<string, unknown>;
-}
-
 /**
  * The digest of the content of a manifest.
  *
- * The content fields are the ones the Python side covers
- * (`FACADE_ARTIFACT_CONTENT_FIELDS`), and they are hashed over the canonical
- * JSON, which is the form the two languages write identically.
+ * The computation is the shipped one
+ * (`packages/core/src/adapter/embedding-manifest.ts:120`), over the canonical
+ * JSON of the content fields, which is the form the two languages write
+ * identically. The facade does not carry a second implementation of a
+ * digest: a second implementation is a second address.
  */
 export function digestOfContent(manifest: Record<string, unknown>): string {
-  const content: Record<string, unknown> = {};
   for (const field of FACADE_ARTIFACT_CONTENT_FIELDS) {
     if (!(field in manifest)) {
       throw new FacadeError(
@@ -397,9 +467,88 @@ export function digestOfContent(manifest: Record<string, unknown>): string {
         `the manifest carries no ${field}, and the content of the artifact cannot be addressed without it`,
       );
     }
-    content[field] = manifest[field];
   }
-  return createHash('sha256').update(canonicalJson(content), 'utf8').digest('hex');
+  return embeddingContentDigest(manifest);
+}
+
+/**
+ * The digest of the bytes of one asset, as the worker computed it.
+ *
+ * The asset path is resolved against the approved root of the assets, with
+ * the same three refusals as the artifact: a traversal, a link that leaves
+ * the root and a file that is not a regular file. The digest is the sha256
+ * of the bytes, which is the form the manifest carries.
+ */
+export async function digestOfAsset(
+  assetRoot: string,
+  assetPath: string,
+): Promise<string> {
+  if (typeof assetRoot !== 'string' || assetRoot.trim().length === 0) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      'no asset root is configured, so the assets of the run cannot be checked',
+    );
+  }
+  const root = resolve(assetRoot);
+  const target = resolve(root, assetPath);
+  const fromRoot = relative(root, target);
+  if (fromRoot.startsWith('..') || isAbsolute(fromRoot)) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the asset "${assetPath}" resolves outside the approved asset root`,
+    );
+  }
+  let realRoot: string;
+  let realTarget: string;
+  try {
+    realRoot = await realpath(root);
+    realTarget = await realpath(target);
+  } catch {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the asset "${assetPath}" is not on disk under the approved asset root`,
+    );
+  }
+  const fromRealRoot = relative(realRoot, realTarget);
+  if (fromRealRoot.startsWith('..') || isAbsolute(fromRealRoot)) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the asset "${assetPath}" leaves the approved asset root through a link`,
+    );
+  }
+  const bytes = await readArtifactFile(realTarget, 'asset', assetPath);
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Requires that the manifest names exactly the assets the run was asked for.
+ *
+ * The manifest carries the sha256 of every asset it embedded. The facade
+ * computes the same digests from the bytes it asked for, and the two sets
+ * must be the same: a run that embedded other images, or the same images
+ * twice and others not at all, is not the run the caller asked for.
+ */
+function requireSameAssets(
+  manifest: Record<string, unknown>,
+  expected: readonly string[],
+  relativePath: string,
+): void {
+  const declared = manifest['assetSha256'];
+  if (!Array.isArray(declared) || declared.some((value) => typeof value !== 'string')) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" carries no list of asset digests, and the assets of the run cannot be checked without it`,
+    );
+  }
+  const declaredSorted = [...(declared as string[])].sort();
+  const expectedSorted = [...expected].sort();
+  if (declaredSorted.length !== expectedSorted.length ||
+    declaredSorted.some((value, index) => value !== expectedSorted[index])) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the artifact "${relativePath}" embedded ${declaredSorted.length} assets while the run asked for ${expectedSorted.length}, and a run that embedded other images is not the run that was asked for`,
+    );
+  }
 }
 
 /** Requires that a number of the manifest is the number the run declared. */
@@ -429,6 +578,29 @@ function requireString(
     throw new FacadeError(
       'ARTIFACT_INVALID',
       `the manifest of "${relativePath}" carries no ${field}, and the transform of the run cannot be named without it`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Requires that a field of the manifest is a bounded name.
+ *
+ * The model id and the revision of the manifest reach the transform name,
+ * which is persisted in the domain and printed in the logs. A worker that
+ * puts a newline or an escape sequence in them would forge a log line, so
+ * the alphabet is bounded before the value is used anywhere.
+ */
+function requireBoundedString(
+  manifest: Record<string, unknown>,
+  field: string,
+  relativePath: string,
+): string {
+  const value = requireString(manifest, field, relativePath);
+  if (!FACADE_MODEL_FIELD_PATTERN.test(value)) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the ${field} of "${relativePath}" is not a bounded name, and a name that reaches a row or a log must carry only letters, digits, dots, dashes, colons and at signs`,
     );
   }
   return value;

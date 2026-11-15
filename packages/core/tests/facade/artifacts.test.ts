@@ -16,10 +16,12 @@ import { FacadeError } from '../../src/facade/errors.js';
  * the worker declared, and an artifact that leaves the approved root is
  * refused.
  *
- * The fixture is a REAL artifact: the Python side wrote it, and its digest
- * was computed by the Python side. The test that reads it proves that the
- * two languages agree on the canonical form of the digest, which is what
- * lets the facade check the bytes the worker wrote.
+ * The fixture is a REAL artifact: it is the golden artifact of the
+ * repository (`benchmarks/parity/vision-embed.artifact/`), written by the
+ * Python side over the committed fixtures, with the digest the Python side
+ * computed. The test that reads it proves that the two languages agree on
+ * the canonical form of the digest, which is what lets the facade check the
+ * bytes the worker wrote.
  */
 const FIXTURE_ROOT = join(
   fileURLToPath(new URL('.', import.meta.url)),
@@ -29,9 +31,9 @@ const FIXTURE_ROOT = join(
 
 /** The digest the Python side computed for the fixture. */
 const FIXTURE_DIGEST =
-  '771aadcbc610c566165d9b247627af460b05c3f6263fb5fc3c862b54f66dd117';
+  '4f706336517e10f7194963241c623af1d5039f4fc74fb3bc9c7479bfeaaf586a';
 
-const FIXTURE_RUN_ID = 'run-fixture-0001';
+const FIXTURE_RUN_ID = 'embed-23961656d069411baecac8e1d638b47f';
 
 let scratch: string;
 
@@ -46,7 +48,7 @@ afterEach(async () => {
 describe('the artifact of the facade', () => {
   it('names the artifact relative to the approved root', () => {
     expect(artifactRelativePath(FIXTURE_RUN_ID)).toBe(
-      'artifacts/embedding/run-fixture-0001',
+      `artifacts/embedding/${FIXTURE_RUN_ID}`,
     );
   });
 
@@ -71,16 +73,18 @@ describe('the artifact of the facade', () => {
       artifactRoot: FIXTURE_ROOT,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
 
     expect(reference.reference.kind).toBe('embedding');
-    expect(reference.reference.relativePath).toBe('artifacts/embedding/run-fixture-0001');
+    expect(reference.reference.relativePath).toBe(
+      `artifacts/embedding/${FIXTURE_RUN_ID}`,
+    );
     expect(reference.reference.relativePath.startsWith('/')).toBe(false);
     expect(reference.reference.sha256).toBe(FIXTURE_DIGEST);
-    expect(reference.reference.bytes).toBe(2 * 3 * 4);
+    expect(reference.reference.bytes).toBe(6 * 768 * 4);
     expect(reference.transform).toEqual({
       modelId: 'siglip2-base',
       revision: '75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2',
@@ -93,8 +97,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: FIXTURE_ROOT,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: 'f'.repeat(64),
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -119,8 +123,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: FIXTURE_ROOT,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float16',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -132,8 +136,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: FIXTURE_ROOT,
       embeddingRunId: 'run-that-never-happened',
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -145,8 +149,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: '',
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -170,8 +174,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: root,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -201,8 +205,8 @@ describe('the artifact of the facade', () => {
       artifactRoot: root,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
@@ -232,12 +236,166 @@ describe('the artifact of the facade', () => {
       artifactRoot: root,
       embeddingRunId: FIXTURE_RUN_ID,
       sha256: FIXTURE_DIGEST,
-      count: 2,
-      dimensions: 3,
+      count: 6,
+      dimensions: 768,
       dtype: 'float32',
     });
     expect(error.code).toBe('ARTIFACT_INVALID');
     expect(error.message).toContain('leaves the approved artifact root');
+  });
+
+  it('refuses a vectors file that is a link out of the approved root', async () => {
+    const root = join(scratch, 'root');
+    const directory = join(root, 'artifacts', 'embedding', FIXTURE_RUN_ID);
+    await mkdir(directory, { recursive: true });
+    await writeFile(
+      join(directory, 'manifest.json'),
+      await readFile(
+        join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'manifest.json'),
+      ),
+    );
+    const outside = join(scratch, 'outside.bin');
+    await writeFile(
+      outside,
+      await readFile(join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'vectors.f32')),
+    );
+    await symlink(outside, join(directory, 'vectors.f32'));
+
+    const error = await refusal({
+      artifactRoot: root,
+      embeddingRunId: FIXTURE_RUN_ID,
+      sha256: FIXTURE_DIGEST,
+      count: 6,
+      dimensions: 768,
+      dtype: 'float32',
+    });
+    expect(error.code).toBe('ARTIFACT_INVALID');
+    expect(error.message).toContain('not a regular file');
+  });
+
+  it('refuses a manifest that is a link out of the approved root', async () => {
+    const root = join(scratch, 'root');
+    const directory = join(root, 'artifacts', 'embedding', FIXTURE_RUN_ID);
+    await mkdir(directory, { recursive: true });
+    const outside = join(scratch, 'outside.json');
+    await writeFile(
+      outside,
+      await readFile(
+        join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'manifest.json'),
+      ),
+    );
+    await symlink(outside, join(directory, 'manifest.json'));
+    await writeFile(
+      join(directory, 'vectors.f32'),
+      await readFile(join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'vectors.f32')),
+    );
+
+    const error = await refusal({
+      artifactRoot: root,
+      embeddingRunId: FIXTURE_RUN_ID,
+      sha256: FIXTURE_DIGEST,
+      count: 6,
+      dimensions: 768,
+      dtype: 'float32',
+    });
+    expect(error.code).toBe('ARTIFACT_INVALID');
+    expect(error.message).toContain('not a regular file');
+  });
+
+  it('refuses a manifest that names another run', async () => {
+    const root = join(scratch, 'root');
+    const directory = join(root, 'artifacts', 'embedding', FIXTURE_RUN_ID);
+    await mkdir(directory, { recursive: true });
+    const manifest = JSON.parse(
+      await readFile(
+        join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'manifest.json'),
+        'utf-8',
+      ),
+    ) as Record<string, unknown>;
+    await writeFile(
+      join(directory, 'manifest.json'),
+      JSON.stringify({ ...manifest, embeddingRunId: 'run-other' }),
+    );
+    await writeFile(
+      join(directory, 'vectors.f32'),
+      await readFile(join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'vectors.f32')),
+    );
+
+    const error = await refusal({
+      artifactRoot: root,
+      embeddingRunId: FIXTURE_RUN_ID,
+      sha256: FIXTURE_DIGEST,
+      count: 6,
+      dimensions: 768,
+      dtype: 'float32',
+    });
+    expect(error.code).toBe('ARTIFACT_INVALID');
+    expect(error.message).toContain('names the run');
+  });
+
+  it('refuses a manifest whose model id carries an escape sequence', async () => {
+    const root = join(scratch, 'root');
+    const directory = join(root, 'artifacts', 'embedding', FIXTURE_RUN_ID);
+    await mkdir(directory, { recursive: true });
+    const manifest = JSON.parse(
+      await readFile(
+        join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'manifest.json'),
+        'utf-8',
+      ),
+    ) as Record<string, unknown>;
+    // The worker signs the manifest it wrote, so the digest of the tampered
+    // manifest is consistent: the check that refuses it is the one on the
+    // alphabet of the name, not the one on the digest.
+    const tampered = { ...manifest, modelId: 'evil\nrm -rf /' };
+    const digest = digestOfContent(tampered);
+    await writeFile(
+      join(directory, 'manifest.json'),
+      JSON.stringify({ ...tampered, artifactDigest: digest }),
+    );
+    await writeFile(
+      join(directory, 'vectors.f32'),
+      await readFile(join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'vectors.f32')),
+    );
+
+    const error = await refusal({
+      artifactRoot: root,
+      embeddingRunId: FIXTURE_RUN_ID,
+      sha256: digest,
+      count: 6,
+      dimensions: 768,
+      dtype: 'float32',
+    });
+    expect(error.code).toBe('ARTIFACT_INVALID');
+    expect(error.message).toContain('bounded name');
+  });
+
+  it('refuses an artifact that embedded other assets', async () => {
+    const root = join(scratch, 'root');
+    const directory = join(root, 'artifacts', 'embedding', FIXTURE_RUN_ID);
+    await mkdir(directory, { recursive: true });
+    const manifest = JSON.parse(
+      await readFile(
+        join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'manifest.json'),
+        'utf-8',
+      ),
+    ) as Record<string, unknown>;
+    await writeFile(join(directory, 'manifest.json'), JSON.stringify(manifest));
+    await writeFile(
+      join(directory, 'vectors.f32'),
+      await readFile(join(FIXTURE_ROOT, 'artifacts', 'embedding', FIXTURE_RUN_ID, 'vectors.f32')),
+    );
+
+    const error = await refusal({
+      artifactRoot: root,
+      embeddingRunId: FIXTURE_RUN_ID,
+      sha256: FIXTURE_DIGEST,
+      count: 6,
+      dimensions: 768,
+      dtype: 'float32',
+      expectedAssetDigests: ['a'.repeat(64), 'b'.repeat(64)],
+    });
+    expect(error.code).toBe('ARTIFACT_INVALID');
+    expect(error.message).toContain('embedded');
   });
 });
 
