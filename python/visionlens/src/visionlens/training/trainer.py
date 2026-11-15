@@ -2,8 +2,7 @@
 
 The trainer trains on the `train` partition ONLY and it selects on the `val`
 partition ONLY (`docs/vnext/specs/VLN-009-encoder-probe-training.md:14`, "Train
-only on train split, tune via validation, lock test evaluation"; FR-003 of the
-local spec of the ticket). The test partition is not read here: the selection
+only on train split, tune via validation, lock test evaluation"). The test partition is not read here: the selection
 code and the evaluation code are separate modules, and the lock of the test
 partition belongs to the holdout evaluation, which does not exist yet. The
 run RECORDS the items it read, so the absence of a test read is observable
@@ -19,16 +18,16 @@ The features are NOT computed here: the trainer consumes the frozen artifact
 of the encoder and reuses it (`training/features.py`). A trainer that
 recomputed the vectors would train on a pipeline nobody pinned, and the
 vectors of the training and of the inference would not be the same vectors
-(FR-025 of the local spec of the ticket).
+(`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`).
 
 The EARLY STOPPING is the M2 rung, not this one: the pack puts the early
 stopping criterion with the fine tuning and its schedulers
 (`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:7`) and this ticket is the M0
-rung, whose non-goals name the early stopping of the M2
-(`specs/023-encoder-probe-training/spec.md`, "No PyTorch linear head, no
-fine-tuning, no partial unfreezing, no SGD loop with early stopping"). A
-recipe that carries a criterion is therefore REFUSED with the reason, and
-never silently ignored: a decision nobody applied is not a decision.
+rung, which is the frozen encoder and a logistic regression
+(`docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:5`, and the decision in
+`docs/adr/024-trainer-and-frozen-features.md`). A recipe that carries a
+criterion is therefore REFUSED with the reason, and never silently
+ignored: a decision nobody applied is not a decision.
 
 What is recorded, because the pack asks for it and a run that does not record
 it cannot be reproduced:
@@ -38,6 +37,12 @@ it cannot be reproduced:
   the run and the capability report cannot answer in two different ways, and
   an explicit device this build does not admit is REFUSED with the reason,
   never substituted (`docs/vnext/adrs/ADR-017-local-first-hardware.md:12`).
+  The OPERATOR LIMITS are not measured by this rung, and that is a refusal
+  and not an omission: the CPU is the reference device and the accelerator is
+  refused, so there is no operator to be incompatible with. The pack asks for
+  the operator compatibility checks of the accelerator
+  (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`), and this build
+  cannot run it.
 - the CURVE of the run: the accuracy of the train and of the validation
   partition at every epoch. The curve of the M0 rung is flat, and that is a
   property of the rung and not a defect of the measurement: a logistic
@@ -49,8 +54,8 @@ it cannot be reproduced:
   because a number that averages the two is a number nobody can use
   (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
 - the THROUGHPUT of the fit and the PEAK MEMORY of the process, so the run
-  carries the numbers the hardware matrix asks for (FR-015 and FR-016 of the
-  local spec of the ticket).
+  carries the numbers the hardware matrix asks for
+  (`docs/vnext/11-VISION-MODEL-REGISTRY-INFERENCE.md:35`).
 """
 
 from __future__ import annotations
@@ -278,8 +283,30 @@ def _selected(
     @raises TrainerError when the run carries items the recipe does not
         pin, or an item of the test partition.
     """
-    train = [item for item in items if item.partition == "train"]
-    val = [item for item in items if item.partition == "val"]
+    train: List[SplitItem] = []
+    val: List[SplitItem] = []
+    for item in items:
+        # The partitions the trainer reads come from the constant of the
+        # selection, so the name of the partitions lives in one place and the
+        # test partition is not one of them by construction.
+        if item.partition == SELECTION_PARTITIONS[0]:
+            train.append(item)
+        elif item.partition == SELECTION_PARTITIONS[1]:
+            val.append(item)
+    # The leak is checked FIRST: an item of the locked test partition in the
+    # selection is a worse fact than an item that the recipe does not pin, and
+    # the diagnosis that names the leak is the one that matters.
+    locked = set(recipe.partitions.get("test", ()))
+    leaked = [item.item_id for item in train + val if item.item_id in locked]
+    if leaked:
+        raise TrainerError(
+            "TRAINER_PARTITION_LEAK",
+            "partitions.test",
+            f"{len(leaked)} item(s) of the locked test partition were selected: "
+            f"{', '.join(leaked[:5])}; the selection code and the evaluation code are "
+            "separate modules, and a selection that reads the test partition is a "
+            "selection that leaks",
+        )
     for partition, selected in (("train", train), ("val", val)):
         pinned = set(recipe.partitions.get(partition, ()))
         carried = {item.item_id for item in selected}
@@ -293,17 +320,6 @@ def _selected(
                 f"the run carries {len(carried)} ({missing} not carried, {extra} not "
                 "pinned); a run over items nobody pinned is a run nobody can reproduce",
             )
-    locked = set(recipe.partitions.get("test", ()))
-    leaked = [item.item_id for item in train + val if item.item_id in locked]
-    if leaked:
-        raise TrainerError(
-            "TRAINER_PARTITION_LEAK",
-            "partitions.test",
-            f"{len(leaked)} item(s) of the locked test partition were selected: "
-            f"{', '.join(leaked[:5])}; the selection code and the evaluation code are "
-            "separate modules, and a selection that reads the test partition is a "
-            "selection that leaks",
-        )
     return train, val
 
 
@@ -415,11 +431,17 @@ def train(
     final_checkpoint = ""
     model: ProbeModel | None = None
     fit_seconds = 0.0
+    cold_read_ms = 0.0
 
     for epoch in range(1, max_epochs + 1):
         started = time.perf_counter()
         model = fit_probe_from_recipe(recipe, train_vectors, train_labels)
         fit_seconds += time.perf_counter() - started
+        if epoch == 1:
+            # The cold read is the FIRST prediction of the run: it is timed
+            # here, before the curve reads the model, so it is a cold number
+            # and not the first of a population of warm ones.
+            cold_read_ms = _cold_read_of(model, val_vectors)
         curve.append(
             EpochPoint(
                 epoch=epoch,
@@ -445,8 +467,12 @@ def train(
             "nobody can resume",
         )
 
-    cold_read, warm_p50, warm_p95 = _read_of(model, val_vectors)
-    throughput = len(train_items) / fit_seconds if fit_seconds > 0 else 0.0
+    warm_p50, warm_p95 = _warm_read_of(model, val_vectors)
+    # The throughput counts the items that the fit READ: one epoch reads
+    # every item of the train partition, and the run reads the partition
+    # once per epoch.
+    items_read = len(train_items) * max_epochs
+    throughput = items_read / fit_seconds if fit_seconds > 0 else 0.0
 
     return TrainingRun(
         recipe_fingerprint=fingerprint,
@@ -460,29 +486,46 @@ def train(
         final_checkpoint=final_checkpoint,
         read_items=tuple(item.item_id for item in selected),
         throughput_per_second=throughput,
-        cold_read_ms=cold_read,
+        cold_read_ms=cold_read_ms,
         warm_read_p50_ms=warm_p50,
         warm_read_p95_ms=warm_p95,
         peak_memory_bytes=peak_memory_bytes(),
     )
 
 
-def _read_of(
-    model: ProbeModel, vectors: Sequence[Sequence[float]]
-) -> Tuple[float, float, float]:
-    """The cold read and the warm read of the model, in milliseconds.
+def _cold_read_of(model: ProbeModel, vectors: Sequence[Sequence[float]]) -> float:
+    """The first prediction of the run, in milliseconds.
 
-    The cold read is the FIRST prediction of the run and the warm read is
-    the percentiles of the rest: the two are reported separately, because a
-    number that averages them is a number nobody can use.
+    The cold read is the FIRST prediction of the run and it is measured by
+    the caller, right after the first fit and before anything else reads
+    the model. A number measured after the curve is a warm number, and a
+    cold number that is really warm is a number nobody can use.
     """
     if not vectors:
-        return 0.0, 0.0, 0.0
+        return 0.0
+    started = time.perf_counter()
+    model.predict(vectors[0])
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _warm_read_of(model: ProbeModel, vectors: Sequence[Sequence[float]]) -> Tuple[float, float]:
+    """The percentiles of the warm read of the model, in milliseconds.
+
+    The warm read is every prediction AFTER the cold one: the two are
+    reported separately, because a number that averages them is a number
+    nobody can use.
+
+    The percentiles of an empty population are not a number. The helper of
+    the artifact records the sentinel `unknown` for them, and a run that
+    converts the sentinel to a float dies instead of reporting. A run
+    without a warm prediction records zero.
+    """
     timings: List[float] = []
     for vector in vectors:
         started = time.perf_counter()
         model.predict(vector)
         timings.append((time.perf_counter() - started) * 1000.0)
-    cold = timings[0]
-    warm = latency_percentiles(timings[1:])
-    return cold, float(warm["p50Ms"]), float(warm["p95Ms"])
+    if not timings:
+        return 0.0, 0.0
+    warm = latency_percentiles(timings)
+    return float(warm["p50Ms"]), float(warm["p95Ms"])
