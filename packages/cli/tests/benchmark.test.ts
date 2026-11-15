@@ -54,7 +54,6 @@ function runBin(args: string[]): BinResult {
     // The CLI reads the repository files by their repository-relative paths,
     // so it is spawned from the repository root.
     cwd: REPO_ROOT,
-    env: { ...process.env },
   });
   expect(result.error).toBeUndefined();
   return {

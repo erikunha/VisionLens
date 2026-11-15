@@ -24,8 +24,9 @@ vi.setConfig({ testTimeout: 30_000 });
  * The compatibility bin that used to print the same output plus one
  * deprecation line is gone, and its three assertions went with it: they
  * asserted the behavior of a bin this repository no longer ships. The
- * parity of the canonical bin is still asserted here, because that is the
- * property the migration promised.
+ * parity that is still asserted here is the parity with the pre-migration
+ * baseline, and it still holds: the canonical bin prints the bytes it
+ * printed before the migration.
  *
  * Requires built binaries. Skips (fast unit runs) when dist is missing; the
  * integration entry point is: pnpm --filter @vision-lens/cli test:bins
