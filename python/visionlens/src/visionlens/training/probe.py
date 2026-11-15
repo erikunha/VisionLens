@@ -286,11 +286,28 @@ class ProbeModel:
                 f"the model carries {len(coefficients)} coefficient rows and "
                 f"{len(intercepts)} intercepts for {len(class_map.entries)} classes",
             )
+        dimension = int(record.get("dimension", 0))
+        if dimension <= 0:
+            raise ProbeError(
+                "PROBE_MODEL_INVALID",
+                "model.dimension",
+                f"the model declares the dimension {dimension} and a fitted model declares "
+                "the dimension of the vectors it was fitted over",
+            )
+        for index, row in enumerate(coefficients):
+            if len(row) != dimension:
+                raise ProbeError(
+                    "PROBE_MODEL_INVALID",
+                    f"model.coefficients.{index}",
+                    f"the row carries {len(row)} values and the model declares the dimension "
+                    f"{dimension}; the rows of a model and the vectors of the run share one "
+                    "dimension",
+                )
         return ProbeModel(
             estimator=str(record.get("estimator", M0_ESTIMATOR)),
             solver=str(record.get("solver", "lbfgs")),
             seed=int(record.get("seed", 0)),
-            dimension=int(record.get("dimension", 0)),
+            dimension=dimension,
             class_map=class_map,
             coefficients=coefficients,
             intercepts=intercepts,

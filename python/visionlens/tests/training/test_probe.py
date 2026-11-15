@@ -516,3 +516,15 @@ def test_a_manifest_that_names_a_file_outside_the_run_is_refused(
 
     assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
 
+
+def test_a_model_whose_rows_carry_another_dimension_is_refused() -> None:
+    """The rows of a model and the vectors of the run share one dimension."""
+    model = fit_probe_from_recipe(tiny_recipe(), TINY_FEATURES, TINY_LABELS)
+    record = model.to_dict()
+    record["dimension"] = 3
+
+    with pytest.raises(ProbeError) as failure:
+        ProbeModel.from_dict(record)
+
+    assert failure.value.code == "PROBE_MODEL_INVALID"
+
