@@ -168,6 +168,54 @@ def test_a_recipe_rebuilt_from_its_record_keeps_its_fingerprint() -> None:
     assert rebuilt.fingerprint == recipe.fingerprint
 
 
+def test_a_numeric_weight_survives_the_round_trip_through_the_wire_form() -> None:
+    """A weight the run chose is still a number when the recipe is read back.
+
+    The wire form is what the other side validates, so a weight that came
+    back as the text of a number would be refused by the very side the
+    recipe was published for.
+    """
+    weights = default_class_weights(label_keys_of_split())
+    chosen = sorted(weights)[0]
+    weights[chosen] = 2
+
+    recipe = resolve_tracked(class_weights=weights)
+    rebuilt = recipe_from_record(json.loads(json.dumps(recipe.to_record())))
+
+    assert rebuilt.to_dict() == recipe.to_dict()
+    assert rebuilt.to_record()["classWeights"][chosen] == 2
+
+
+def test_a_record_whose_address_is_not_the_digest_of_its_body_is_refused() -> None:
+    """The declared address is checked, not trusted.
+
+    A record that claims one configuration and hashes another is a record
+    nobody can reproduce, and the recipe refuses it instead of keeping the
+    address it was handed.
+    """
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["fingerprint"] = "fp2:0123456789abcdef"
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_FINGERPRINT_MISMATCH"
+    assert failure.value.field == "fingerprint"
+
+
+def test_a_record_whose_body_was_edited_is_refused() -> None:
+    """Changing one field of the body breaks the address of the record."""
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["seed"] = 43
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_FINGERPRINT_MISMATCH"
+
+
 def test_the_leakage_guard_refuses_and_names_the_shared_items(tmp_path: Path) -> None:
     split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
     leaking = copy.deepcopy(split)

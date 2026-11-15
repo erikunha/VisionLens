@@ -76,7 +76,12 @@ of the tree recorded below.
    recipe over the TRACKED registry and the TRACKED split, validates it
    against the TypeScript schema, recomputes the fingerprint and compares
    the two addresses. A fingerprint only one side can recompute proves
-   nothing, so the claim has a command and not a sentence.
+   nothing, so the claim has a command and not a sentence. The gate runs over
+   BOTH regimes of class weight, the default one where every class is weighted
+   `none` and the numeric one where every class carries a number: a gate that
+   looked at one regime would let the other one rot, and a weight that
+   crosses the boundary as the text of a number satisfies the regime of
+   `none` perfectly.
 4. The schema of the TypeScript side is STRICT, like the manifest of the
    adapter: a recipe with a field nobody knows is a recipe nobody
    maintains, and a field one side knows and the other does not is a hole in
@@ -96,7 +101,16 @@ of the tree recorded below.
      training set, and it is invisible in the metrics.
    - the recipe refuses a CLASS whose weight is not documented, and it
      refuses a weight for a class the ontology does not have. A weight may
-     be `none`, and `none` is a documented decision and not a missing one.
+     be `none`, and `none` is a documented decision and not a missing one. A
+     weight that is a number stays a NUMBER in the wire form, because the
+     schema of the other side accepts a number or the word `none` and a
+     weight written as the text of a number is a weight the other side
+     refuses.
+   - the recipe refuses a RECORD whose declared address is not the digest of
+     its own body. The address is checked and not trusted: a record that
+     claims one configuration and hashes another is a record nobody can
+     reproduce, and the read-back path recomputes the digest instead of
+     keeping the address it was handed.
    - the recipe refuses a DEVICE the record does not support. The CPU is
      the reference device and a silent fallback is forbidden
      (`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`).

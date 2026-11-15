@@ -413,6 +413,37 @@ def _label_keys_of(split: Mapping[str, Any]) -> Tuple[str, ...]:
     return tuple(sorted(set(keys)))
 
 
+def _checked_weight(label_key: str, value: Any) -> Any:
+    """The weight of one class, checked and in the form the wire carries.
+
+    A weight is a number or the word `none`, and a number STAYS a number:
+    the schema of the other side accepts a number or the word `none`, and
+    a weight written as the text of a number is a weight the other side
+    has to refuse.
+    """
+    if isinstance(value, str):
+        _require(
+            value == "none",
+            "RECIPE_CLASS_WEIGHT_INVALID",
+            f"classWeights.{label_key}",
+            f"the only documented weight that is not a number is 'none', got '{value}'",
+        )
+        return "none"
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RecipeError(
+            "RECIPE_CLASS_WEIGHT_INVALID",
+            f"classWeights.{label_key}",
+            "a class weight is a number or the word 'none'",
+        )
+    _require(
+        value >= 0,
+        "RECIPE_CLASS_WEIGHT_INVALID",
+        f"classWeights.{label_key}",
+        "a class weight may not be negative",
+    )
+    return value if isinstance(value, int) else float(value)
+
+
 def _class_weights_of(
     class_weights: Mapping[str, Any], label_keys: Sequence[str]
 ) -> Dict[str, Any]:
@@ -432,32 +463,7 @@ def _class_weights_of(
                 "a documented weight",
             )
         value = class_weights[label_key]
-        if isinstance(value, str):
-            _require(
-                value == "none",
-                "RECIPE_CLASS_WEIGHT_INVALID",
-                f"classWeights.{label_key}",
-                f"the only documented weight that is not a number is 'none', got '{value}'",
-            )
-            weights[label_key] = "none"
-            continue
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise RecipeError(
-                "RECIPE_CLASS_WEIGHT_INVALID",
-                f"classWeights.{label_key}",
-                "a class weight is a number or the word 'none'",
-            )
-        _require(
-            value >= 0,
-            "RECIPE_CLASS_WEIGHT_INVALID",
-            f"classWeights.{label_key}",
-            "a class weight may not be negative",
-        )
-        # The weight stays a NUMBER, and it stays the number it was: the schema
-        # of the other side accepts a number or the word 'none', and a weight
-        # written as the text of a number is a weight the other side has to
-        # read as a string.
-        weights[label_key] = value if isinstance(value, int) else float(value)
+        weights[label_key] = _checked_weight(label_key, value)
     unknown = sorted(set(class_weights) - set(label_keys))
     if unknown:
         raise RecipeError(
@@ -577,6 +583,11 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
 
     The wire form is what the TypeScript side validates, so the recipe that
     a run consumed can be read back without the files it came from.
+
+    The address of the record is CHECKED and not trusted: the digest of the
+    body is recomputed, and a record whose declared address is not the
+    digest of its own body is refused, because a record that claims one
+    configuration and hashes another is a record nobody can reproduce.
     """
     _require(
         isinstance(record, Mapping),
@@ -623,7 +634,10 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
         dataset=dataset,
         partitions=partitions,
         ontology_version=str(record["ontologyVersion"]),
-        class_weights={str(k): str(v) for k, v in record["classWeights"].items()},
+        class_weights={
+            str(label_key): _checked_weight(str(label_key), value)
+            for label_key, value in record["classWeights"].items()
+        },
         estimator=str(record["estimator"]),
         optimizer=str(record["optimizer"]),
         hyperparameters=dict(record["hyperparameters"]),
@@ -638,12 +652,18 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
         contracts_version=str(record["contractsVersion"]),
         recipe_version=str(record["recipeVersion"]),
     )
-    return TrainRecipe(
-        **{
-            **recipe.__dict__,
-            "fingerprint": str(record.get("fingerprint", "")) or recipe_fingerprint(recipe),
-        }
-    )
+    computed = recipe_fingerprint(recipe)
+    declared = str(record.get("fingerprint", ""))
+    if declared:
+        _require(
+            declared == computed,
+            "RECIPE_FINGERPRINT_MISMATCH",
+            "fingerprint",
+            f"the record declares the address {declared} and its own body digests to "
+            f"{computed}; a record that claims one configuration and hashes another is "
+            "a record nobody can reproduce",
+        )
+    return TrainRecipe(**{**recipe.__dict__, "fingerprint": computed})
 
 
 def default_class_weights(label_keys: Sequence[str]) -> Dict[str, str]:
