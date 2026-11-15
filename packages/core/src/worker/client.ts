@@ -23,6 +23,51 @@ import { assertMajorsCompatible, buildHostHello, parseWorkerHello } from './hand
 import { spawnWorkerProcess } from './host.js';
 
 /**
+ * The environment the child inherits from the host.
+ *
+ * The worker is a DIFFERENT program with a different job, and the host may
+ * carry the keys of a paid provider in its environment. The child therefore
+ * inherits an ALLOWLIST and nothing else: the variables a program needs to
+ * run at all, and the variables the caller names explicitly through
+ * {@link WorkerClientOptions.env}.
+ *
+ * The four `VISIONLENS_WORKER_*` variables of the runtime are NOT here: they
+ * are the operator's configuration of the worker, and the surface that
+ * launches the worker hands them over by name
+ * (`packages/core/src/facade/adapter.ts`).
+ */
+const INHERITED_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TZ',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'PYTHONPATH',
+  'PYTHONHOME',
+  'VIRTUAL_ENV',
+  'SYSTEMROOT',
+  'COMSPEC',
+  'PATHEXT',
+  'USERPROFILE',
+  'APPDATA',
+  'LOCALAPPDATA',
+] as const;
+
+/** Builds the environment of the child from the allowlist and the options. */
+export function buildWorkerEnvironment(explicit: NodeJS.ProcessEnv | undefined): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of INHERITED_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return { ...env, ...explicit };
+}
+
+/**
  * The host side of the `visionlens.worker.v1` channel.
  *
  * Frames in, frames out, nothing else on those channels: the child's stdout
@@ -140,7 +185,7 @@ export class WorkerClient {
         interpreter,
         scriptPath,
         scriptArgs: options.scriptArgs,
-        env: { ...process.env, ...options.env },
+        env: buildWorkerEnvironment(options.env),
       });
     } catch (cause) {
       if (cause instanceof WorkerLaunchError) throw cause;

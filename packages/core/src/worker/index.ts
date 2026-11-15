@@ -36,6 +36,7 @@ export {
 export type { WorkerSpawnInput, WorkerSpawnOptions } from './host.js';
 
 export {
+  buildWorkerEnvironment,
   computeBackoffDelayMs,
   DEFAULT_WORKER_RETRY_POLICY,
   requestWithRetry,

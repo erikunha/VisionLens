@@ -1,6 +1,10 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkerClient, WorkerLaunchError } from '../../src/worker/index.js';
+import {
+  buildWorkerEnvironment,
+  WorkerClient,
+  WorkerLaunchError,
+} from '../../src/worker/index.js';
 import {
   isAllowedWorkerInterpreter,
   spawnWorkerProcess,
@@ -137,5 +141,26 @@ describe('WorkerClient.launch enforces the allowlist', () => {
   it('the allowlisted fixture interpreter still launches and handshakes', async () => {
     const { client } = await launchFixture('happy');
     expect(client.clientState).toBe('running');
+  });
+});
+
+describe('the environment of the worker', () => {
+  it('hands the worker an allowlist and not the environment of the host', () => {
+    const before = process.env['OPENAI_API_KEY'];
+    process.env['OPENAI_API_KEY'] = 'sk-a-secret-of-the-host';
+    try {
+      const env = buildWorkerEnvironment({ FIXTURE_MODE: 'happy' });
+      expect(env['OPENAI_API_KEY']).toBeUndefined();
+      expect(env['FIXTURE_MODE']).toBe('happy');
+      expect(env['PATH']).toBe(process.env['PATH']);
+    } finally {
+      if (before === undefined) delete process.env['OPENAI_API_KEY'];
+      else process.env['OPENAI_API_KEY'] = before;
+    }
+  });
+
+  it('lets the caller name a variable of the host explicitly', () => {
+    const env = buildWorkerEnvironment({ VISIONLENS_WORKER_REGISTRY: '/tmp/registry.json' });
+    expect(env['VISIONLENS_WORKER_REGISTRY']).toBe('/tmp/registry.json');
   });
 });
