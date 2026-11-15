@@ -33,12 +33,13 @@ vision = [
     "safetensors>=0.6,<1",
 ]
 # The `training` extra is the one this ticket fills: the estimator of the
-# M0 rung (scikit-learn, with numpy under it) and the reader of the frozen
-# feature artifact (joblib). The recipe imports none of it and the
-# estimator imports the stack inside the fit, so the base install stays
-# free of the heavy stack until a probe is trained. The checkpoint of a
-# run is a JSON document and not a pickled estimator, so it needs no
-# serialization library of its own.
+# M0 rung (scikit-learn, with numpy under it), and the pin of joblib for
+# the reader of the frozen feature artifact, which is the next piece of
+# the ticket. The recipe imports none of it and the estimator imports the
+# stack inside the fit, so the base install stays free of the heavy stack
+# until a probe is trained. The checkpoint of a run is a JSON document and
+# not a pickled estimator, so it needs no serialization library of its
+# own.
 training = [
     "scikit-learn>=1.7,<2",
     "numpy>=2.3,<3",
