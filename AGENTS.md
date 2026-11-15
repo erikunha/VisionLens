@@ -342,10 +342,8 @@ key error points at.
   a commit subject, a commit body, a pull request title, a pull request body, a comment, a document
   or a log line a user sees. A comma, a colon, a full stop or parentheses do the same job
   (amendment of 2026-11-15: the upstream snapshot under `docs/vnext/` is the one exception. It is
-  reproduced byte for byte under a manifest, so its typography is the typography of the upstream,
-  including the dashes it carries. Editing a file of the pack to fix a dash breaks the manifest and
-  the provenance, so the pack is never edited. Every document this repository writes obeys the
-  rule)
+  reproduced byte for byte under a manifest, so its typography is the typography of the upstream, and
+  no file of the pack is edited to fix a dash)
 - The tracked mirrors of the planning work are `docs/adr/` (the decisions) and `ROADMAP.md` (the
   phase and spec status). Update every document that describes what changed in the same commit
 
