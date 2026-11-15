@@ -163,7 +163,7 @@ Activation requires a new ADR + spec per track.
 ## Phase map (vNext series, 015-027)
 
 The canonical design package delivered 2026-11-11 is integrated verbatim under `docs/vnext/`
-(64 tracked files, `docs/vnext/MANIFEST.sha256` validated). It supersedes the earlier design
+(65 tracked files, 64 of them covered by `docs/vnext/MANIFEST.sha256`, validated). It supersedes the earlier design
 only where it says so (`docs/vnext/00-ADOPTION-NO-OVERWRITE.md`): Python-first public ML
 library, a lightweight remote SDK split from the fat in-process exports, Python usable
 in-process without an HTTP server, the VisA number treated as a regression baseline with no
@@ -235,12 +235,14 @@ shipped, with the decision recorded in `docs/adr/021-python-worker-facade.md`.
 ## Phase map (Phase II extension: the computer vision capability packs)
 
 The canonical package delivered 2026-11-11 is integrated verbatim under `docs/vnext/`
-(64 tracked files, `docs/vnext/MANIFEST.sha256` validated). A second delivery of 2026-11-15
+(65 tracked files, 64 of them covered by `docs/vnext/MANIFEST.sha256`, validated). A second delivery of 2026-11-15
 adds the drop-in handoff of the canonical agent (`docs/vnext/AGENTS-HANDOFF.md`, also appended
 to `docs/vnext/VISIONLENS_FULL_SPEC.md`) and the Phase II extension
-`docs/vnext/extensions/computer-vision-2027/` (19 files, `MANIFEST-PHASE-II.sha256` validated).
-The canonical manifest is unchanged by the extension: the pack covers its own files and the
-extension covers its own.
+`docs/vnext/extensions/computer-vision-2027/` (20 tracked files, 19 of them covered by
+`MANIFEST-PHASE-II.sha256`, validated).
+The extension adds no entry to the canonical manifest: the pack covers its own files and the
+extension covers its own. The canonical manifest moved only with the delivery of 2026-11-15,
+which adds the handoff and replaces the hashes of the README and of the full spec.
 
 **The extension is a PROPOSAL, and it says so in its own first line.** It does not represent
 implemented features, open pull requests or executed tests. Nothing of it is shipped, and no
