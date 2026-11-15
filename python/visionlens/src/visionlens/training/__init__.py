@@ -7,7 +7,7 @@ the M0 rung, the checkpoint it writes and the report it publishes.
 The recipe imports nothing heavy: it reads two files and computes a digest,
 so the base install of the package stays free of scikit-learn and numpy.
 The heavy stack of the estimator (scikit-learn, numpy) lands with the
-estimator itself, behind the `train` extra, and the imports of that stack
+estimator itself, behind the `training` extra, and the imports of that stack
 are lazy: importing the training surface never imports the heavy stack.
 """
 

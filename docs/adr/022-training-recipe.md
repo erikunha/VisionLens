@@ -89,13 +89,13 @@ of the tree recorded below.
    nothing, so the claim has a command and not a sentence. The gate proves
    the address of the COMMITTED SOURCE and not of the build: it computes the
    address with the source of the canonical serialisation as well, so a
-   build that is older than the source is caught instead of certified. The gate runs over
-   BOTH regimes of class weight, the default one where every class is weighted
-   `none` and the numeric one where every class carries a number: a gate that
-   looked at one regime would let the other one rot, and a weight that
-   crosses the boundary as the text of a number satisfies the regime of
-   `none` perfectly. The numeric regime carries an integer that is not
-   exactly a double, because a number JavaScript cannot hold reaches the
+   build that is older than the source is caught instead of certified. The
+   gate runs over BOTH regimes of class weight, the default one where every
+   class is weighted `none` and the numeric one where every class carries a
+   number: a gate that looked at one regime would let the other one rot, and
+   a weight that crosses the boundary as the text of a number satisfies the
+   regime of `none` perfectly. The numeric regime carries an integer that is
+   not exactly a double, because a number JavaScript cannot hold reaches the
    other side rounded and the two sides have to write the SAME text for it
    or they compute two addresses for one configuration.
 4. The schema of the TypeScript side is STRICT, like the manifest of the
@@ -136,27 +136,30 @@ of the tree recorded below.
      fingerprint of the partition is recomputed from the assignments the
      recipe reads, over the same pairs the TypeScript side digests, so a
      split whose declared fingerprint does not describe its own items is a
-     split whose snapshot is a name. The HASH OF THE MANIFEST is carried
-     verbatim instead: it covers the bookkeeping of the manifest (the seed,
-     the ratios, the notes), which the recipe does not hold, and the
-     manifest owns its own hash.
+     split whose snapshot is a name.
+   - the recipe refuses a SPLIT that names a manifest it does not have. The
+     hash of the manifest is recomputed too, over the same payload the
+     TypeScript side digests, and it covers the LABELS of the items and not
+     only the bookkeeping of the split: two runs on the same items with
+     different labels are two different runs, and they must not share an
+     address.
    - the recipe refuses a DEVICE the record does not support. The CPU is
      the reference device and a silent fallback is forbidden
      (`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`).
-   - the recipe refuses a pin field that carries no value, and it inherits
-     the exemption of the record for the fields the record lets be empty. A
-     rule the recipe holds to a stricter shape than the record is a rule
-     that refuses a model the platform is allowed to run. The check lives
-     with the pin, so the resolver and the reader judge the same field the
-     same way.
+   - the SHAPE of the recipe is the schema of the contract, and the schema
+     has ONE owner: the file the TypeScript side validates with is
+     generated into the Python package, and the resolver and the reader
+     both validate against it. A recipe the other side refuses is refused
+     here instead of crossing the boundary and being refused there, and a
+     value this side rounds or coerces into the shape the other side
+     accepts is a value the two sides judge differently.
    - the recipe refuses what the schema of the other side refuses: a ceiling
      of epochs that is not a whole number above zero, a checkpoint interval
-     that is not, a seed outside the range the other side holds exactly, an
+     that is not, a seed or a ceiling the other side cannot hold exactly, an
      optimizer without a name, an augmentation without a name. The rules
-     live here as well, because a recipe the other side refuses is a recipe
-     that never reaches a trainer, and the values are checked as they are
-     and never coerced: a value this side rounds into the shape the other
-     side accepts is a value the two sides judge differently.
+     live here as well, because the refusal of the recipe names the field
+     in the vocabulary of this side, and the values are checked as they are
+     and never coerced.
    - the recipe refuses a RECORD with a field nobody knows, and it refuses a
      record with no address. The other side refuses both, and a field this
      side drops quietly is a field the two sides judge differently without
@@ -170,7 +173,7 @@ of the tree recorded below.
    (`ontology_version_of` in Python and `ontologyVersionOf` in TypeScript),
    and the parity gate recomputes it from the class space the recipe
    carries, so the version of a recipe is an address and not a label.
-7. The `train` extra lands with the ESTIMATOR and not with the recipe. The
+7. The `training` extra lands with the ESTIMATOR and not with the recipe. The
    recipe needs nothing heavy: it reads two files and computes a digest, so
    the base install of the package stays free of scikit-learn and numpy
    until the probe needs them. The spec lists the extra with the recipe
@@ -183,13 +186,16 @@ of the tree recorded below.
    proves the rule fires.
 9. The recipe has a GENERATED schema, the same mechanism the manifest of
    the adapter uses. The committed file
-   (`packages/core/src/training/train-recipe.schema.json`) is generated from
-   the same Zod schema the TypeScript side validates with, the CI proves the
-   committed file does not drift from it, and the Python side validates the
-   recipe it publishes against that file. The shape of the recipe is a rule
-   that lives in one language, and a rule that is written twice is a rule
-   that drifts: the two sides refused different recipes until the shape came
-   from one place.
+   (`python/visionlens/src/visionlens/training/train-recipe.schema.json`) is
+   generated from the same Zod schema the TypeScript side validates with,
+   the CI proves the committed file does not drift from it, and it travels
+   WITH the Python package: the side that resolves a recipe reads the
+   contract it has to satisfy in the repository and in the published wheel
+   alike, and a validator that needs a path the wheel does not carry is a
+   validator that only runs in the repository. The shape of the recipe is a
+   rule that lives in one language, and a rule that is written twice is a
+   rule that drifts: the two sides refused different recipes until the shape
+   came from one place.
 10. The JSON Schema validator of the Python side lives in one module
     (`visionlens/jsonschema.py`) and serves both contracts that cross the
     boundary, the manifest of the artifact and the recipe of a run. A
@@ -217,7 +223,7 @@ of the tree recorded below.
 - The label keys of the ontology come from the split, so a recipe over a
   split with a different vocabulary is a different recipe. That is the
   point of the fingerprint, and it is also a coupling.
-- The extra `train` is still empty, so the estimator lands with its pins and
+- The extra `training` is still empty, so the estimator lands with its pins and
   the lock grows with the whole scikit-learn closure at that moment.
 
 ## Reversibility
