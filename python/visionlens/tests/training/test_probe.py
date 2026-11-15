@@ -838,3 +838,48 @@ def test_the_recorded_hyperparameters_are_the_ones_applied() -> None:
     assert weak.hyperparameters["C"] == 1.0
     assert strong.hyperparameters["C"] == 10.0
     assert weak.coefficients != strong.coefficients
+
+
+
+
+def test_a_class_the_run_does_not_train_on_is_refused() -> None:
+    """A class without a single item has no coefficient."""
+    recipe = tiny_recipe()
+    class_map = class_map_from_recipe(recipe)
+    features = TINY_FEATURES[:4]
+    labels = TINY_LABELS[:4]
+
+    with pytest.raises(ProbeError) as failure:
+        fit_probe(
+            features=features,
+            labels=labels,
+            class_map=class_map,
+            seed=recipe.seed,
+            hyperparameters=recipe.hyperparameters,
+            solver=recipe.optimizer,
+            max_epochs=recipe.max_epochs,
+            class_weights=recipe.class_weights,
+        )
+
+    assert failure.value.code == "PROBE_CLASS_UNSUPPORTED"
+
+
+
+
+def test_the_digest_is_checked_before_the_payload_is_read(tmp_path: Path) -> None:
+    """A checkpoint whose bytes changed is refused before it is parsed.
+
+    The payload of the test is not JSON at all, so a reader that parsed it
+    before the digest would fail with the error of the parser.
+    """
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    manifest = write_checkpoint(
+        tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint
+    )
+    (tmp_path / manifest.checkpoint_file).write_text("not json at all", encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(tmp_path / "checkpoint-000001.manifest.json")
+
+    assert failure.value.code == "CHECKPOINT_DIGEST_MISMATCH"
