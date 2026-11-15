@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs';
+import os, { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +8,9 @@ import {
   parseRecordedVisionEmbedSuccess,
   parseSimulatedVisionEmbedSuccess,
   parseVisionEmbedSuccess,
+  runRecordedVisionEmbed,
   runVisionEmbed,
+  tryRecordedVisionEmbed,
   tryVisionEmbed,
   VISION_EMBED_BRIDGE,
   VISION_EMBED_OPERATION,
@@ -16,6 +19,7 @@ import {
   workerErrorResult,
   WorkerClient,
   WORKER_INTERPRETER_ENV,
+  type RecordedVisionEmbedInput,
   type VisionEmbedClient,
   type VisionEmbedInput,
   type VisionEmbedSuccess,
@@ -442,6 +446,127 @@ describe('the vision.embed bridge', () => {
 });
 
 /**
+ * The RECORDED shape of the bridge.
+ *
+ * The request names the shape it asks for: an input that carries `assets`
+ * asks for the recorded run, and one that carries `images` asks for the
+ * simulated one. A request that carries both is refused before the worker
+ * is asked.
+ */
+describe('the recorded shape of the vision.embed bridge', () => {
+  function recordedInput(
+    overrides: Partial<RecordedVisionEmbedInput> = {},
+  ): RecordedVisionEmbedInput {
+    return {
+      workspaceId: WORKSPACE,
+      assets: [{ assetId: 'asset-a', path: 'a.jpg' }],
+      snapshotId: 'snapshot-1',
+      model: 'siglip2-base',
+      budget: BUDGET,
+      ...overrides,
+    };
+  }
+
+  it('sends the assets, the snapshot and the model of a recorded run', () => {
+    const params = VISION_EMBED_BRIDGE.buildParams(recordedInput({ device: 'auto' }));
+
+    expect(params).toEqual({
+      assets: [{ assetId: 'asset-a', path: 'a.jpg' }],
+      snapshotId: 'snapshot-1',
+      model: 'siglip2-base',
+      device: 'auto',
+    });
+  });
+
+  it('sends no device at all when the caller named none', () => {
+    const params = VISION_EMBED_BRIDGE.buildParams(recordedInput());
+
+    expect(params).not.toHaveProperty('device');
+  });
+
+  it('refuses a request that names both shapes, before the worker is asked', () => {
+    try {
+      VISION_EMBED_BRIDGE.buildParams({
+        ...recordedInput(),
+        images: ['asset-a'],
+      } as never);
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('assets');
+      expect((error as WorkerOperationContractError).message).toContain('images');
+    }
+  });
+
+  it('refuses a recorded request with no asset at all', () => {
+    try {
+      VISION_EMBED_BRIDGE.buildParams(recordedInput({ assets: [] }));
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('assets');
+    }
+  });
+
+  it('refuses a recorded request with no snapshot', () => {
+    try {
+      VISION_EMBED_BRIDGE.buildParams(recordedInput({ snapshotId: '' }));
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('snapshotId');
+    }
+  });
+
+  it('refuses an asset with no id and an asset with no path', () => {
+    try {
+      VISION_EMBED_BRIDGE.buildParams(
+        recordedInput({ assets: [{ assetId: '', path: 'a.jpg' }] }),
+      );
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('assets[0].assetId');
+    }
+    try {
+      VISION_EMBED_BRIDGE.buildParams(
+        recordedInput({ assets: [{ assetId: 'asset-a', path: '' }] }),
+      );
+      expect.unreachable('the request should have been refused');
+    } catch (error) {
+      expect((error as WorkerOperationContractError).field).toBe('assets[0].path');
+    }
+  });
+
+  it('runs the recorded operation and returns the recorded success', async () => {
+    const outcome = await runRecordedVisionEmbed(stubClient(RECORDED_PAYLOAD), recordedInput());
+
+    expect(outcome.kind).toBe('recorded');
+    expect(outcome.embeddingRunId).toBe('embed_demo_001');
+    expect(outcome.count).toBe(5);
+    expect(outcome.dimensions).toBe(768);
+    expect(outcome.artifactSha256).toBe(SHA256);
+  });
+
+  it('refuses a worker that answers a recorded request with a simulation', async () => {
+    // The caller asked for a recorded run, so the vectors of a simulation
+    // are a broken contract and not a success.
+    await expect(
+      runRecordedVisionEmbed(stubClient(SIMULATED_PAYLOAD), recordedInput()),
+    ).rejects.toThrowError(WorkerOperationContractError);
+  });
+
+  it('reports the refusal of the worker as the typed error, with the frozen flag', async () => {
+    const failure = new WorkerProtocolError(
+      'MALFORMED_FRAME',
+      'this worker does not serve the recorded shape of vision.embed',
+    );
+    const outcome = await tryRecordedVisionEmbed(stubClient(undefined, failure), recordedInput());
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) expect.unreachable('the request should have been refused');
+    expect(outcome.error.code).toBe('MALFORMED_FRAME');
+    expect(outcome.error.retryable).toBe(false);
+  });
+});
+
+/**
  * The bridge against the REAL Python worker.
  *
  * The bridge is not a description of the wire: it has to speak it. The
@@ -518,4 +643,92 @@ describe.skipIf(!PYTHON_AVAILABLE || !WORKER_RESOLVED)('the bridge against the r
     expect(outcome.error.retryable).toBe(false);
     expect(outcome.error.message).toContain('no-such-model');
   });
+});
+
+/**
+ * The RECORDED shape against the REAL Python worker.
+ *
+ * The recorded shape is served by the CPU adapter, so the run needs the
+ * `vision` extra and the weights in the local cache. The suite below runs
+ * when the machine has both, and it is skipped when it has not: a test
+ * that cannot run anywhere is a test that proves nothing, and a test
+ * that fails for a missing download is a test that fails for the wrong
+ * reason.
+ */
+const REGISTRY_PATH = path.join(REPO_ROOT, 'datasets', 'registry.json');
+const MODEL_ROOT = path.join(os.homedir(), '.cache', 'visionlens', 'models');
+const FIXTURES_PATH = path.join(REPO_ROOT, 'packages', 'core', 'tests', 'fixtures', 'images');
+const VENV_BIN = path.join(REPO_ROOT, 'python', 'visionlens', '.venv', 'bin');
+
+function weightsAvailable(): boolean {
+  try {
+    const registry = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8')) as {
+      models?: { modelId: string; revision: string }[];
+    };
+    const record = registry.models?.find((model) => model.modelId === 'siglip2-base');
+    if (!record) return false;
+    return existsSync(
+      path.join(MODEL_ROOT, record.modelId, record.revision, 'model.safetensors'),
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The interpreter of the recorded run.
+ *
+ * The host launches the worker from a FIXED allowlist of names, so the
+ * environment of the machine is what decides: the virtual environment of
+ * the package goes first on the PATH, and `python3` resolves to it. The
+ * name stays `python3`, because a path the caller names is exactly what
+ * the allowlist refuses.
+ */
+function recordedPath(): string | undefined {
+  if (!existsSync(VENV_BIN)) return undefined;
+  return VENV_BIN + path.delimiter + (process.env.PATH ?? '');
+}
+
+const RECORDED_AVAILABLE = weightsAvailable() && recordedPath() !== undefined;
+
+describe.skipIf(!RECORDED_AVAILABLE)('the recorded shape against the real worker', () => {
+  it('reads the recorded success of a real vision.embed request', async () => {
+    const artifactRoot = mkdtempSync(path.join(tmpdir(), 'visionlens-recorded-'));
+    const client = track(
+      await WorkerClient.launch({
+        interpreter: process.env[WORKER_INTERPRETER_ENV] ?? 'python3',
+        scriptPath: '-m',
+        scriptArgs: ['visionlens.worker'],
+        env: {
+          ...pythonWorkerEnv(),
+          PATH: recordedPath(),
+          VISIONLENS_WORKER_REGISTRY: REGISTRY_PATH,
+          VISIONLENS_WORKER_MODEL_ROOT: MODEL_ROOT,
+          VISIONLENS_WORKER_ASSET_ROOT: FIXTURES_PATH,
+          VISIONLENS_WORKER_ARTIFACT_ROOT: artifactRoot,
+        },
+      }),
+    );
+
+    const assets = readdirSync(FIXTURES_PATH)
+      .filter((name) => name.endsWith('.jpg'))
+      .sort()
+      .map((name) => ({ assetId: name, path: name }));
+
+    const outcome = await runRecordedVisionEmbed(client, {
+      workspaceId: 'ws-recorded',
+      assets,
+      snapshotId: 'fixtures-2026-11-14',
+      model: 'siglip2-base',
+      budget: { maxSeconds: 600, maxUsdMicro: 0 },
+    });
+
+    expect(outcome.kind).toBe('recorded');
+    expect(outcome.count).toBe(assets.length);
+    expect(outcome.dimensions).toBe(768);
+    expect(outcome.dtype).toBe('float32');
+    expect(outcome.artifactSha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(outcome.errorSamples).toEqual([]);
+    expect('vectors' in outcome).toBe(false);
+  }, 300_000);
 });

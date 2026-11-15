@@ -54,10 +54,13 @@ export type {
 export type { RetryRandom, RetryReconcile, RetryReconcileContext } from './client.js';
 
 export {
+  buildRecordedVisionEmbedParams,
   parseRecordedVisionEmbedSuccess,
   parseSimulatedVisionEmbedSuccess,
   parseVisionEmbedSuccess,
+  runRecordedVisionEmbed,
   runVisionEmbed,
+  tryRecordedVisionEmbed,
   tryVisionEmbed,
   VISION_EMBED_BRIDGE,
   VISION_EMBED_DTYPE,
@@ -67,8 +70,10 @@ export {
   workerErrorResult,
 } from './operations.js';
 export type {
+  RecordedVisionEmbedInput,
   RecordedVisionEmbedSuccess,
   SimulatedVisionEmbedSuccess,
+  VisionEmbedAssetInput,
   VisionEmbedClient,
   VisionEmbedErrorSample,
   VisionEmbedInput,
