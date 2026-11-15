@@ -550,3 +550,53 @@ def test_a_publication_that_fails_is_refused_in_the_vocabulary_of_the_run(
         locked.chmod(0o700)
     pytest.skip("this environment writes in a directory without the write bit")
 
+
+
+
+
+def test_a_parameter_that_is_not_a_finite_number_is_refused() -> None:
+    """A parameter that is not finite answers with a score nobody can read."""
+    model = fit_probe_from_recipe(tiny_recipe(), TINY_FEATURES, TINY_LABELS)
+    record = model.to_dict()
+    record["coefficients"] = [[float("nan"), 0.0], [0.0, 0.0]]
+
+    with pytest.raises(ProbeError) as failure:
+        ProbeModel.from_dict(record)
+
+    assert failure.value.code == "PROBE_MODEL_INVALID"
+
+
+
+
+def test_a_model_whose_support_names_a_class_it_does_not_have_is_refused() -> None:
+    """The support of a class the model does not have is not a support."""
+    model = fit_probe_from_recipe(tiny_recipe(), TINY_FEATURES, TINY_LABELS)
+    record = model.to_dict()
+    record["classSupport"] = {**record["classSupport"], "defect:fryum": 3}
+
+    with pytest.raises(ProbeError) as failure:
+        ProbeModel.from_dict(record)
+
+    assert failure.value.code == "PROBE_MODEL_INVALID"
+
+
+
+
+def test_a_model_with_a_field_of_the_wrong_shape_is_refused_by_the_model() -> None:
+    """A model that carries a field of the wrong shape is refused by it."""
+    model = fit_probe_from_recipe(tiny_recipe(), TINY_FEATURES, TINY_LABELS)
+    record = model.to_dict()
+    record["classSupport"] = "not a mapping"
+
+    with pytest.raises(ProbeError) as failure:
+        ProbeModel.from_dict(record)
+
+    assert failure.value.code == "PROBE_MODEL_INVALID"
+
+
+def test_a_class_map_whose_label_key_is_not_a_name_is_refused() -> None:
+    """A class of the ontology names itself with a label key."""
+    with pytest.raises(ProbeError) as failure:
+        ClassMap.from_dict({"labelKeys": [1, NORMAL], "indexOf": {1: 0, NORMAL: 1}})
+
+    assert failure.value.code == "PROBE_CLASS_SPACE_INVALID"

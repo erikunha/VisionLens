@@ -175,7 +175,15 @@ class ClassMap:
                 "classMap",
                 "the class map carries no label keys or no indices",
             )
-        expected = ClassMap.of([str(label_key) for label_key in label_keys])
+        for label_key in label_keys:
+            if not isinstance(label_key, str) or label_key == "":
+                raise ProbeError(
+                    "PROBE_CLASS_SPACE_INVALID",
+                    "classMap.labelKeys",
+                    f"a class of the ontology names itself with a label key, got "
+                    f"{label_key!r}",
+                )
+        expected = ClassMap.of(label_keys)
         for label_key, index in expected.entries:
             if label_key not in index_of:
                 raise ProbeError(
@@ -212,6 +220,23 @@ class ClassMap:
             f"classMap.{label_key}",
             f"the label '{label_key}' is not a class of the gold vocabulary of the run, and "
             "a prediction outside the vocabulary is a hard error and never a coercion",
+        )
+
+
+def _checked_parameter(value: float, field_path: str) -> None:
+    """A parameter of a model, checked to be a finite number.
+
+    A parameter that is a NaN or an infinity answers with a score nobody can
+    read, and a model that carries one is a model nobody can use.
+
+    @raises ProbeError when the parameter is not a finite number.
+    """
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ProbeError(
+            "PROBE_MODEL_INVALID",
+            field_path,
+            f"the parameter carries {value!r}, and a parameter that is not a finite number "
+            "answers with a score nobody can read",
         )
 
 
@@ -271,12 +296,59 @@ class ProbeModel:
             )
             intercepts = tuple(float(value) for value in record["intercepts"])
             class_map = ClassMap.from_dict(record["classMap"])
+            dimension = int(record["dimension"])
+            seed = int(record["seed"])
+            max_epochs = int(record["maxEpochs"])
+            train_accuracy = float(record["trainAccuracy"])
+            class_support = {
+                str(key): int(value)
+                for key, value in dict(record["classSupport"]).items()
+            }
+            class_weights = {
+                str(key): value for key, value in dict(record["classWeights"]).items()
+            }
+            hyperparameters = dict(record["hyperparameters"])
+            insufficient_support = tuple(
+                str(key) for key in record["insufficientSupport"]
+            )
         except (KeyError, TypeError, ValueError) as error:
+            # Every conversion of the wire form is inside the guard, so a
+            # model that carries a field of the wrong shape is refused by
+            # the model and not by the language.
             raise ProbeError(
                 "PROBE_MODEL_INVALID",
                 "model",
                 f"the model does not carry the shape of a fitted probe: {error}",
             ) from error
+        for index, row in enumerate(coefficients):
+            for position, value in enumerate(row):
+                _checked_parameter(value, f"model.coefficients.{index}.{position}")
+        for index, value in enumerate(intercepts):
+            _checked_parameter(value, f"model.intercepts.{index}")
+        _checked_parameter(train_accuracy, "model.trainAccuracy")
+        if max_epochs <= 0:
+            raise ProbeError(
+                "PROBE_MODEL_INVALID",
+                "model.maxEpochs",
+                f"the model declares the ceiling of {max_epochs} epochs and a fitted model "
+                "declares a ceiling above zero",
+            )
+        unknown_support = sorted(set(class_support) - set(class_map.label_keys))
+        if unknown_support:
+            raise ProbeError(
+                "PROBE_MODEL_INVALID",
+                "model.classSupport",
+                f"the model carries the support of {len(unknown_support)} class(es) it does "
+                f"not have: {', '.join(unknown_support)}",
+            )
+        unknown_weights = sorted(set(class_weights) - set(class_map.label_keys))
+        if unknown_weights:
+            raise ProbeError(
+                "PROBE_MODEL_INVALID",
+                "model.classWeights",
+                f"the model carries the weight of {len(unknown_weights)} class(es) it does "
+                f"not have: {', '.join(unknown_weights)}",
+            )
         if len(coefficients) != len(class_map.entries) or len(intercepts) != len(
             class_map.entries
         ):
@@ -286,7 +358,6 @@ class ProbeModel:
                 f"the model carries {len(coefficients)} coefficient rows and "
                 f"{len(intercepts)} intercepts for {len(class_map.entries)} classes",
             )
-        dimension = int(record.get("dimension", 0))
         if dimension <= 0:
             raise ProbeError(
                 "PROBE_MODEL_INVALID",
@@ -306,24 +377,17 @@ class ProbeModel:
         return ProbeModel(
             estimator=str(record.get("estimator", M0_ESTIMATOR)),
             solver=str(record.get("solver", "lbfgs")),
-            seed=int(record.get("seed", 0)),
+            seed=seed,
             dimension=dimension,
             class_map=class_map,
             coefficients=coefficients,
             intercepts=intercepts,
-            class_support={
-                str(key): int(value)
-                for key, value in dict(record.get("classSupport", {})).items()
-            },
-            insufficient_support=tuple(
-                str(key) for key in record.get("insufficientSupport", [])
-            ),
-            class_weights={
-                str(key): value for key, value in dict(record.get("classWeights", {})).items()
-            },
-            hyperparameters=dict(record.get("hyperparameters", {})),
-            max_epochs=int(record.get("maxEpochs", 0)),
-            train_accuracy=float(record.get("trainAccuracy", 0.0)),
+            class_support=class_support,
+            insufficient_support=insufficient_support,
+            class_weights=class_weights,
+            hyperparameters=hyperparameters,
+            max_epochs=max_epochs,
+            train_accuracy=train_accuracy,
         )
 
     def scores(self, features: Sequence[float]) -> Tuple[float, ...]:
