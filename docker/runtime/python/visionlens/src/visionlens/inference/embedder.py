@@ -25,7 +25,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple
 
 from ..encoders.base import Encoder, EncoderOutput
 from ..errors import EmbeddingRunEmptyError, LibraryError, LibraryErrorCode, ModelRunFailedError
@@ -115,6 +115,12 @@ class VisionEmbedder:
     The embedder owns the pipeline of the ticket: decode, preprocess,
     batch, embed, write the artifact. Every part it uses is injected,
     so a run is reproducible and a test never reaches the network.
+
+    The caller owns the two things a run cannot own by itself: the
+    PROGRESS of the run and the CHECKPOINT that stops it. The checkpoint
+    is asked between the steps of the run, so a cancellation and a
+    deadline stop a long run at the next batch and not at the end of the
+    model call.
     """
 
     def __init__(
@@ -127,6 +133,8 @@ class VisionEmbedder:
         artifact_root: Path,
         scheduler: Optional[BatchScheduler] = None,
         snapshot_id: str = "snapshot-unknown",
+        progress: Optional[Callable[[int, int], None]] = None,
+        checkpoint: Optional[Callable[[], None]] = None,
     ) -> None:
         self.record = record
         self.encoder = encoder
@@ -136,6 +144,28 @@ class VisionEmbedder:
         self.artifact_root = Path(artifact_root)
         self.scheduler = scheduler or BatchScheduler()
         self.snapshot_id = snapshot_id
+        self._progress = progress
+        self._checkpoint = checkpoint
+
+    def _check(self) -> None:
+        """Ask the caller whether the run may go on.
+
+        The check is asked OUTSIDE the batch, so a cancellation and a
+        deadline keep their own code: a failure raised inside the batch
+        would be read as a failure of the model.
+        """
+        if self._checkpoint is not None:
+            self._checkpoint()
+
+    def _report(self, completed: int, total: int) -> None:
+        """Tell the caller how far the run is.
+
+        The count is the number of assets that will not need the model
+        again: a refused asset is done, and an embedded one is done. The
+        total is the number of assets of the run, and it never changes.
+        """
+        if self._progress is not None:
+            self._progress(completed, total)
 
     def embed(self, request: EmbedRequest) -> EmbedResult:
         """Embed the images of the request and write the artifact.
@@ -149,7 +179,10 @@ class VisionEmbedder:
         prepared: list[Tuple[EmbedAsset, Any]] = []
 
         digests: list[str] = []
+        total = len(request.assets)
+        self._report(0, total)
         for asset in request.assets:
+            self._check()
             try:
                 decoded = self.decoder.decode(asset.path)
                 preprocessed = self.spec.apply(decoded.image)
@@ -162,6 +195,7 @@ class VisionEmbedder:
                         message=exc.message,
                     )
                 )
+                self._report(len(errors), total)
                 continue
             except ValueError as exc:
                 # The preprocessing refused the pixels of this image. The
@@ -175,6 +209,7 @@ class VisionEmbedder:
                         message=str(exc),
                     )
                 )
+                self._report(len(errors), total)
                 continue
             digests.append(decoded.sha256)
             prepared.append((asset, preprocessed))
@@ -204,7 +239,12 @@ class VisionEmbedder:
                 ),
                 samples=samples,
             )
-        output = self._embed_in_batches(prepared, latencies, fallbacks)
+        output = self._embed_in_batches(
+            prepared,
+            latencies,
+            fallbacks,
+            lambda embedded: self._report(len(errors) + embedded, total),
+        )
         vectors = list(output.vectors)
         if len(vectors) != len(prepared):
             # The encoder answered with another number of vectors than the
@@ -263,6 +303,7 @@ class VisionEmbedder:
         prepared: Sequence[Tuple[EmbedAsset, Any]],
         latencies: list[float],
         fallbacks: list[ResourceFallback],
+        progress: Optional[Callable[[int], None]] = None,
     ) -> EncoderOutput:
         """Embed the images, backing off when the memory runs out.
 
@@ -273,6 +314,10 @@ class VisionEmbedder:
         vectors: list[Tuple[float, ...]] = []
         start = 0
         while start < count:
+            # The checkpoint is asked BEFORE the batch, and not inside the
+            # try below: a cancellation and a deadline keep their own code
+            # when they travel out of here.
+            self._check()
             # The budget of the back off is per batch: a batch that fits
             # does not spend the attempts of the one before it.
             attempts = 0
@@ -330,6 +375,8 @@ class VisionEmbedder:
             latencies.extend([elapsed * 1000.0 / size] * size)
             vectors.extend(output.vectors)
             start += size
+            if progress is not None:
+                progress(len(vectors))
         return EncoderOutput(
             vectors=tuple(vectors),
             dimension=self.encoder.dimension,

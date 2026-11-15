@@ -41,6 +41,22 @@ import type { WorkerRequestInput, WorkerRequestResult } from './client.js';
  * as they are, and this module only says what a caller may do with what
  * arrives.
  *
+ * ## The two shapes of the REQUEST of `vision.embed`
+ *
+ * The bridge builds the params of the shape the caller asks for, and the
+ * params name the shape:
+ *
+ * - the SIMULATED shape, whose params carry `images`, the references the
+ *   deterministic runtime derives its vectors from;
+ * - the RECORDED shape, whose params carry `assets` and a `snapshotId`,
+ *   and which the CPU adapter of the ticket answers with an artifact on
+ *   disk.
+ *
+ * A request that carries both is refused before the worker is asked: a
+ * request that claims two shapes asks for a run nobody can serve. The
+ * worker refuses the recorded shape too, when it was not configured with
+ * the environment of the real runtime, and it names what is missing.
+ *
  * ## No dependency outside the worker
  *
  * The validators here are written by hand instead of with Zod, because the
@@ -163,12 +179,46 @@ export interface WorkerOperationBridge<TInput, TSuccess> {
   readonly parseSuccess: (result: unknown) => TSuccess;
 }
 
-/** The input of the `vision.embed` operation. */
+/** The input of the `vision.embed` operation, in the SIMULATED shape. */
 export interface VisionEmbedInput {
   /** The workspace the request belongs to. */
   readonly workspaceId: string;
   /** The asset references to embed. */
   readonly images: readonly string[];
+  /** The model to embed with. */
+  readonly model: string;
+  /** The device to ask for; the worker resolves `auto` to the CPU. */
+  readonly device?: 'auto' | 'cpu';
+  /** The budget of the request. */
+  readonly budget: WorkerBudget;
+  /** The id of the request; the client generates one when it is absent. */
+  readonly requestId?: string;
+}
+
+/** One asset of a RECORDED run: the asset id and where its bytes live. */
+export interface VisionEmbedAssetInput {
+  /** The id the run and the artifact name the asset by. */
+  readonly assetId: string;
+  /** The path of the asset, relative to the approved root of the worker. */
+  readonly path: string;
+}
+
+/**
+ * The input of the `vision.embed` operation, in the RECORDED shape.
+ *
+ * The recorded shape is the one the CPU adapter of the ticket produces:
+ * the vectors are on disk, and the line names the artifact. The request
+ * names the ASSETS to embed and the SNAPSHOT the run belongs to, and the
+ * worker refuses a request that asks for the recorded shape when it was
+ * not configured with the environment of the real runtime.
+ */
+export interface RecordedVisionEmbedInput {
+  /** The workspace the request belongs to. */
+  readonly workspaceId: string;
+  /** The assets to embed. */
+  readonly assets: readonly VisionEmbedAssetInput[];
+  /** The snapshot the run belongs to. */
+  readonly snapshotId: string;
   /** The model to embed with. */
   readonly model: string;
   /** The device to ask for; the worker resolves `auto` to the CPU. */
@@ -506,10 +556,111 @@ export function workerErrorResult(failure: unknown): WorkerOperationErrorResult 
 // The registry
 // ----------------------------------------------------------------------
 
-/** The bridge of the `vision.embed` operation. */
-export const VISION_EMBED_BRIDGE: WorkerOperationBridge<VisionEmbedInput, VisionEmbedSuccess> = {
+/**
+ * Whether the input asks for the RECORDED shape.
+ *
+ * The shape is named by the payload and not by a discriminator field:
+ * a request that carries `assets` asks for the recorded shape, and one
+ * that carries `images` asks for the simulated one. The types of the two
+ * inputs are disjoint, and the guard is written by hand because the
+ * `in` narrowing of the compiler cannot tell the two apart when a
+ * caller is not TypeScript.
+ */
+function isRecordedEmbedInput(
+  input: VisionEmbedInput | RecordedVisionEmbedInput,
+): input is RecordedVisionEmbedInput {
+  return 'assets' in input;
+}
+
+/**
+ * Builds the params of a RECORDED run.
+ *
+ * The request names the assets, the snapshot and the model, and the
+ * worker turns them into a run that writes an artifact. A request that
+ * carries no asset is refused here, before the worker is asked: a run
+ * that embedded nothing is not a run.
+ */
+export function buildRecordedVisionEmbedParams(
+  input: RecordedVisionEmbedInput,
+): Record<string, unknown> {
+  if (!Array.isArray(input.assets)) {
+    // A caller that is not TypeScript may hand an input with no assets
+    // at all. The refusal names the field, and it is a CONTRACT refusal
+    // and not a crash of the worker: a request that can never succeed
+    // is not a failure worth retrying.
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'assets',
+      'the operation vision.embed needs the assets of a recorded run, and the request carried none',
+    );
+  }
+  if (input.assets.length === 0) {
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'assets',
+      'the operation vision.embed needs at least one asset, and the request carried none',
+    );
+  }
+  if (typeof input.snapshotId !== 'string' || input.snapshotId.length === 0) {
+    throw new WorkerOperationContractError(
+      VISION_EMBED_OPERATION,
+      'snapshotId',
+      'the operation vision.embed needs the snapshot the run belongs to, and the request carried none',
+    );
+  }
+  const assets = input.assets.map((asset, index) => {
+    if (typeof asset?.assetId !== 'string' || asset.assetId.length === 0) {
+      throw new WorkerOperationContractError(
+        VISION_EMBED_OPERATION,
+        `assets[${index}].assetId`,
+        'an asset of vision.embed carries no assetId',
+      );
+    }
+    if (typeof asset?.path !== 'string' || asset.path.length === 0) {
+      throw new WorkerOperationContractError(
+        VISION_EMBED_OPERATION,
+        `assets[${index}].path`,
+        'an asset of vision.embed carries no path',
+      );
+    }
+    return { assetId: asset.assetId, path: asset.path };
+  });
+  const params: Record<string, unknown> = {
+    assets,
+    snapshotId: input.snapshotId,
+    model: input.model,
+  };
+  if (input.device !== undefined) params.device = input.device;
+  return params;
+}
+
+/**
+ * The bridge of the `vision.embed` operation.
+ *
+ * The bridge builds the params of the shape the caller asks for: the
+ * simulated one for an input that carries `images`, and the recorded one
+ * for an input that carries `assets`. A request that carries BOTH claims
+ * two shapes at once and is refused, because a request that names two
+ * shapes asks for a run nobody can serve.
+ */
+export const VISION_EMBED_BRIDGE: WorkerOperationBridge<
+  VisionEmbedInput | RecordedVisionEmbedInput,
+  VisionEmbedSuccess
+> = {
   operation: VISION_EMBED_OPERATION,
-  buildParams: (input: VisionEmbedInput) => {
+  buildParams: (input) => {
+    if ('assets' in input && 'images' in input) {
+      throw new WorkerOperationContractError(
+        VISION_EMBED_OPERATION,
+        'assets',
+        'the request of vision.embed names the recorded shape (assets) and the ' +
+          'simulated one (images) at the same time, and a request that claims ' +
+          'two shapes asks for a run nobody can serve',
+      );
+    }
+    if (isRecordedEmbedInput(input)) {
+      return buildRecordedVisionEmbedParams(input);
+    }
     if (input.images.length === 0) {
       // A run with no image embedded nothing, and a run that embedded
       // nothing is not a run: the request is refused here, before the
@@ -566,6 +717,54 @@ export async function tryVisionEmbed(
 ): Promise<WorkerOperationOutcome<VisionEmbedSuccess>> {
   try {
     const result = await runVisionEmbed(client, input);
+    return { ok: true, result };
+  } catch (failure) {
+    if (failure instanceof WorkerOperationContractError) throw failure;
+    return { ok: false, error: workerErrorResult(failure) };
+  }
+}
+
+/**
+ * Runs `vision.embed` in the RECORDED shape and returns the recorded
+ * success.
+ *
+ * The success is parsed with the RECORDED parser and not with the parser
+ * of the union: the caller asked for a recorded run, so a worker that
+ * answers with the vectors of a simulation is a worker that broke the
+ * contract of the operation.
+ *
+ * @throws WorkerOperationContractError when the payload is not the shape
+ *     the operation promises.
+ */
+export async function runRecordedVisionEmbed(
+  client: VisionEmbedClient,
+  input: RecordedVisionEmbedInput,
+): Promise<RecordedVisionEmbedSuccess> {
+  const outcome = await client.request({
+    ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+    operation: VISION_EMBED_BRIDGE.operation,
+    workspaceId: input.workspaceId,
+    // The params are built by the BRIDGE and not by the builder of the
+    // recorded shape alone: the bridge refuses a request that names both
+    // shapes, and every entry point of the operation refuses it the same
+    // way.
+    params: VISION_EMBED_BRIDGE.buildParams(input),
+    budget: input.budget,
+  });
+  return parseRecordedVisionEmbedSuccess(outcome.result);
+}
+
+/**
+ * Runs `vision.embed` in the RECORDED shape and returns the recorded
+ * success or the typed error, and never throws for a failure the
+ * operation reported.
+ */
+export async function tryRecordedVisionEmbed(
+  client: VisionEmbedClient,
+  input: RecordedVisionEmbedInput,
+): Promise<WorkerOperationOutcome<RecordedVisionEmbedSuccess>> {
+  try {
+    const result = await runRecordedVisionEmbed(client, input);
     return { ok: true, result };
   } catch (failure) {
     if (failure instanceof WorkerOperationContractError) throw failure;

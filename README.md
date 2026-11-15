@@ -190,7 +190,53 @@ vision-lens search --query <text>               # search classified images by se
 vision-lens diff <before.json> <after.json>     # compare two analysis_results.json files
 vision-lens import-run <analysis_results.json>  # import a legacy run into the Vision Lens store
 vision-lens benchmark run|gate|report           # score a suite, gate it against a baseline, report an artifact
+vision-lens python embed --snapshot <id> --asset <id=path>   # embed the assets of a snapshot with the Python worker
 ```
+
+---
+
+## The Python worker route
+
+`vision-lens python embed` sends the `vision.embed` operation to the Python worker over the
+versioned JSONL channel. It is a NEW surface: no existing command, flag or provider changes, and
+the legacy path never launches a worker.
+
+The route is opt in. Without the opt in the command refuses with `ROUTE_DISABLED` and names the
+variable that turns it on, and no process is started.
+
+| Variable | Meaning |
+|---|---|
+| `VISION_LENS_PYTHON_ROUTE` | `enabled` turns the route on. The default is off. |
+| `VISION_LENS_PYTHON_WORKSPACE` | The workspace the runs belong to. Default `local`. |
+| `VISION_LENS_PYTHON_ARTIFACT_ROOT` | The root the worker writes its artifacts under. `VISIONLENS_WORKER_ARTIFACT_ROOT` is read as well. |
+| `VISION_LENS_PYTHON_MAX_SECONDS` | The wall-clock ceiling of one run, in seconds. Default `300`. |
+| `VISIONLENS_WORKER_ASSET_ROOT` | The root the worker resolves the paths of the assets against. |
+| `VISIONLENS_WORKER_REGISTRY` | The registry of the models the worker may run. |
+| `VISIONLENS_WORKER_MODEL_ROOT` | The cache of the weights of the models. |
+| `VISION_LENS_WORKER_INTERPRETER` | The interpreter the worker is launched with. Default `python3`. |
+
+| Flag | Argument | Description | Default |
+|---|---|---|---|
+| `--snapshot` | `<id>` | The snapshot the run belongs to. Required. | none |
+| `--asset` | `<id=path>` | An asset to embed, repeatable. The path is relative to the asset root. | none |
+| `--model` | `<name>` | The encoder to run. | `siglip2-base` |
+| `--workspace` | `<id>` | The workspace the run belongs to. | `local` |
+| `--artifact-root` | `<dir>` | The root the worker writes its artifacts under. | the environment |
+| `--asset-root` | `<dir>` | The root the worker resolves the asset paths against. | the environment |
+| `--max-seconds` | `<n>` | The wall-clock ceiling of the run, in seconds. | `300` |
+| `--route` | `<value>` | `enabled` or `disabled`. | the environment |
+| `--idempotency-key` | `<key>` | The key that makes the run idempotent. | `embed-<snapshot>` |
+| `--db` | `<path>` | The store the artifact row is written to. | nothing is written |
+| `--output-format` | `<fmt>` | `pretty`, `json` or `none`. | `pretty` |
+
+The worker runs on the CPU, it writes a content-addressed artifact and the command prints the
+relative reference of it with its digest. The exit codes of the route are its own: `0` success,
+`2` a validation refusal, `3` an unavailable dependency, `4` a policy refusal and `5` a runtime
+failure. There is no fallback to a paid provider.
+
+The decision is recorded in `docs/adr/021-python-worker-facade.md`. The run of the facade against
+the real worker is a command of the repository (`pnpm exec tsx scripts/facade/embed-run.ts`), and
+its output is recorded in `docs/architecture/python-worker-facade-verification.md`.
 
 ---
 

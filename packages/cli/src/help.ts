@@ -12,6 +12,7 @@ ${chalk.bold('USAGE')}
   vision-lens search [--query <text> | --keyword <text>]
   vision-lens report [--output <dir>] [--out <file>]
   vision-lens benchmark run|gate|report [OPTIONS]
+  vision-lens python embed --snapshot <id> --asset <id=path> [OPTIONS]
   vision-lens reorder
   vision-lens single <number> <file>
 

@@ -33,6 +33,17 @@ const llmSdkRestriction = {
 const WORKER_BOUNDARY_MESSAGE =
   'packages/core/src/worker/ may import the Node stdlib (child_process included), @vision-lens/contracts and packages/core/src/utils/ only: no LLM SDK, no Sharp, no direct store access, no benchmark internals (see the module boundary table in AGENTS.md).';
 
+/**
+ * Boundary message for `packages/core/src/facade/` (the boundary-table row in
+ * AGENTS.md): the application service over the Python worker may import the
+ * Node stdlib, the contracts, the types of the route, the worker client and
+ * utils/. It may NOT import a provider SDK, Sharp, the store, the analyzer or
+ * the processor: the facade routes an operation, it does not classify an
+ * image and it does not write to the database itself.
+ */
+const FACADE_BOUNDARY_MESSAGE =
+  'packages/core/src/facade/ may import the Node stdlib, @vision-lens/contracts, packages/core/src/config/ (the types of the route), packages/core/src/worker/, packages/core/src/utils/ and the contract of the manifest (packages/core/src/adapter/embedding-manifest.js) only: no LLM SDK, no Sharp, no direct store access, no analyzer, no processor and no other module of the adapter (see the module boundary table in AGENTS.md).';
+
 export default [
   js.configs.recommended,
   {
@@ -132,6 +143,68 @@ export default [
             {
               group: ['../benchmark', '../benchmark.js', '../benchmark/*', '../benchmark/**'],
               message: WORKER_BOUNDARY_MESSAGE,
+            },
+          ],
+        },
+      ],
+    },
+  },
+  // Facade boundary rule (the packages/core/src/facade/ row of the boundary
+  // table in AGENTS.md): the application service over the Python worker may
+  // import the Node stdlib, the contracts, the types of the route, the worker
+  // client and utils/. The LLM SDK entries are restated because this block
+  // replaces the workspace-wide restriction for these files;
+  // `pnpm run check:boundaries` proves the rule fires with a violating
+  // fixture and passes a clean one.
+  {
+    files: ['packages/core/src/facade/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            ...LLM_SDKS.map((name) => ({ name, message: LLM_SDK_MESSAGE })),
+            { name: 'sharp', message: FACADE_BOUNDARY_MESSAGE },
+          ],
+          patterns: [
+            ...LLM_SDKS.map((name) => ({ group: [`${name}/*`], message: LLM_SDK_MESSAGE })),
+            { group: ['sharp', 'sharp/*'], message: FACADE_BOUNDARY_MESSAGE },
+            {
+              group: ['../store', '../store.js', '../store/*', '../store/**'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../index.js', '../index'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['@vision-lens/core', '@vision-lens/core/*'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../analyzer', '../analyzer.js', '../analyzer/*', '../analyzer/**'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['../processor', '../processor.js', '../processor/*', '../processor/**'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            // The facade validates the artifact with the contract of the
+            // manifest, and with NOTHING else of the adapter: the commit of
+            // the artifact and the parity gate are the work of the adapter,
+            // not of the application service over the worker. The list is
+            // explicit because the rule has no way to name the ONE module of
+            // the adapter the facade may reach; the boundary gate enumerates
+            // the files of the adapter and proves that every one of them but
+            // the contract is refused, so a module added tomorrow cannot slip
+            // in without the gate noticing.
+            {
+              group: [
+                '../adapter/index.js',
+                '../adapter/embedding-commit.js',
+                '../adapter/parity.js',
+              ],
+              message: FACADE_BOUNDARY_MESSAGE,
             },
           ],
         },

@@ -16,6 +16,7 @@
     "./classifier": "./dist/classifier/index.js",
     "./config": "./dist/config/index.js",
     "./diff": "./dist/diff/index.js",
+    "./facade": "./dist/facade/index.js",
     "./fs": "./dist/fs/index.js",
     "./reporter/sqlite-schema": "./dist/reporter/sqlite-schema.js",
     "./search": "./dist/search/index.js",

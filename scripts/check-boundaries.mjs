@@ -18,6 +18,12 @@
  *       boundary rule of the boundary-table row in AGENTS.md
  *   - packages/core/src/worker/…/worker-clean.ts stdlib + contracts
  *     → eslint MUST pass (exit 0)
+ *   - packages/core/src/facade/…/facade-violating.ts imports the store
+ *     → eslint MUST fail (exit 1): the path matches the facade-scoped
+ *       boundary rule of the boundary-table row in AGENTS.md
+ *   - packages/core/src/facade/…/facade-clean.ts stdlib + contracts + the
+ *     worker client
+ *     → eslint MUST pass (exit 0)
  *
  * Why stdin and not a file: a planted violation is a violation. While it sat
  * in the tree, every other tool that walks the tree read it as source: the
@@ -30,6 +36,7 @@
  * Run: `pnpm run check:boundaries` (repo root). Wired into CI later.
  */
 import { spawnSync } from 'node:child_process';
+import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -79,6 +86,36 @@ const WORKER_CLEAN_PATH = path.join(
   'worker-clean.ts',
 );
 
+// Under packages/core/src/facade/, at the SAME DEPTH as the real files of
+// the module: the boundary rule matches the import specifier as it is
+// written, and a real facade file reaches the store as '../store/...'. A
+// fixture nested one level deeper would write '../../store/...' and would
+// NOT match the rule, which would prove nothing.
+const FACADE_VIOLATING_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-violating.ts',
+);
+const FACADE_BARREL_VIOLATING_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-barrel-violating.ts',
+);
+const FACADE_CLEAN_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-clean.ts',
+);
+
 const VIOLATING = `import OpenAI from 'openai';
 // Deliberate boundary violation fixture — must trip no-restricted-imports.
 export const client = OpenAI;
@@ -101,6 +138,57 @@ import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
 export const protocol = WORKER_PROTOCOL_ID;
 export const spawnWorker = spawn;
 `;
+
+const FACADE_VIOLATING = `import { DerivedArtifactsRepository } from '../store/repositories/derived-artifacts.js';
+// Deliberate facade boundary violation fixture: the facade may not reach the
+// store directly, because the store is the domain writer and the facade
+// only asks it to commit a row.
+export const artifacts = DerivedArtifactsRepository;
+`;
+
+const FACADE_BARREL_VIOLATING = `import { openMigratedStore } from '../index.js';
+// Deliberate facade boundary violation fixture: the barrel of the core
+// re-exports the store, so a facade that reaches the barrel reaches the
+// store too. The rule has to name the barrel as well.
+export const store = openMigratedStore;
+`;
+
+const FACADE_CLEAN = `import { createHash } from 'node:crypto';
+import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
+import { WorkerClient } from '../worker/index.js';
+import type { PythonRouteConfig } from '../config/index.js';
+import { validateEmbeddingManifest } from '../adapter/embedding-manifest.js';
+// Clean facade fixture: node stdlib plus contracts plus the worker client
+// plus the types of the route plus the contract of the manifest, must lint
+// green.
+export const digest = createHash('sha256');
+export const protocol = WORKER_PROTOCOL_ID;
+export const client = WorkerClient;
+export type { PythonRouteConfig };
+export const manifest = validateEmbeddingManifest;
+`;
+
+/**
+ * The ONE module of the adapter the facade may reach.
+ *
+ * The facade validates the artifact with the contract of the manifest, and
+ * with nothing else: the commit of the artifact and the parity gate are the
+ * work of the adapter. The rule of the boundary names the forbidden modules
+ * one by one, because the rule has no way to say "this directory except that
+ * file", and THIS list is what keeps the rule honest: every module of the
+ * adapter that is not named here is planted as a fixture and has to be
+ * refused, so a module added tomorrow cannot slip in without the gate
+ * noticing.
+ */
+const FACADE_ALLOWED_ADAPTER_MODULES = ['embedding-manifest.js'];
+
+/** The modules of the adapter that live in the tree right now. */
+function adapterModules() {
+  const adapterDir = path.join(repoRoot, 'packages', 'core', 'src', 'adapter');
+  return readdirSync(adapterDir)
+    .filter((name) => name.endsWith('.ts') && !name.endsWith('.d.ts'))
+    .sort();
+}
 
 /**
  * Lint one fixture from stdin, under a virtual filename.
@@ -175,6 +263,83 @@ try {
   } else {
     console.log('ok: worker clean fixture (node:child_process + contracts) lints green');
   }
+
+  const facadeViolating = runEslint(FACADE_VIOLATING, FACADE_VIOLATING_PATH);
+  if (facadeViolating.status !== 1) {
+    failed = true;
+    console.error(
+      `FAIL: facade violating fixture should exit 1 (direct store access inside facade/), got ${facadeViolating.status}\n${facadeViolating.stdout}${facadeViolating.stderr}`,
+    );
+  } else if (
+    !facadeViolating.stdout.includes('no-restricted-imports') ||
+    !facadeViolating.stdout.includes('packages/core/src/facade')
+  ) {
+    failed = true;
+    console.error(
+      `FAIL: violation reported, but not by the facade boundary rule:\n${facadeViolating.stdout}`,
+    );
+  } else {
+    console.log('ok: direct store access inside facade/ is rejected (no-restricted-imports)');
+  }
+
+  const facadeBarrelViolating = runEslint(FACADE_BARREL_VIOLATING, FACADE_BARREL_VIOLATING_PATH);
+  if (facadeBarrelViolating.status !== 1) {
+    failed = true;
+    console.error(
+      `FAIL: facade barrel violating fixture should exit 1 (the barrel of the core re-exports the store), got ${facadeBarrelViolating.status}\n${facadeBarrelViolating.stdout}${facadeBarrelViolating.stderr}`,
+    );
+  } else if (!facadeBarrelViolating.stdout.includes('no-restricted-imports')) {
+    failed = true;
+    console.error(
+      `FAIL: violation reported, but not by the facade boundary rule:\n${facadeBarrelViolating.stdout}`,
+    );
+  } else {
+    console.log('ok: the barrel of the core inside facade/ is rejected (no-restricted-imports)');
+  }
+
+  const facadeClean = runEslint(FACADE_CLEAN, FACADE_CLEAN_PATH);
+  if (facadeClean.status !== 0) {
+    failed = true;
+    console.error(
+      `FAIL: facade clean fixture should exit 0, got ${facadeClean.status}\n${facadeClean.stdout}${facadeClean.stderr}`,
+    );
+  } else {
+    console.log('ok: facade clean fixture (node stdlib + contracts + worker) lints green');
+  }
+
+  // Every module of the adapter but the contract of the manifest is refused
+  // inside the facade. The list of the tree is read here, so a module added
+  // tomorrow is planted without touching the rule of the boundary.
+  const modules = adapterModules();
+  const specifiers = modules.map((module) => module.replace(/\.ts$/, '.js'));
+  for (const allowed of FACADE_ALLOWED_ADAPTER_MODULES) {
+    if (!specifiers.includes(allowed)) {
+      failed = true;
+      console.error(
+        `FAIL: the facade is allowed to reach "${allowed}", but the adapter has no such module`,
+      );
+    }
+  }
+  for (const module of modules) {
+    // The tree carries the TypeScript file; the import specifier is the
+    // JavaScript one, the way NodeNext resolves it.
+    const specifier = module.replace(/\.ts$/, '.js');
+    if (FACADE_ALLOWED_ADAPTER_MODULES.includes(specifier)) continue;
+    const fixture = `import * as adapter from '../adapter/${specifier}';
+// Deliberate facade boundary violation fixture: the facade reaches the
+// contract of the manifest and nothing else of the adapter.
+export const adapterModule = adapter;
+`;
+    const result = runEslint(fixture, FACADE_VIOLATING_PATH);
+    if (result.status !== 1) {
+      failed = true;
+      console.error(
+        `FAIL: the facade may not reach the adapter module "${specifier}", eslint exited ${result.status}\n${result.stdout}${result.stderr}`,
+      );
+    } else {
+      console.log(`ok: the adapter module "${specifier}" is rejected inside facade/`);
+    }
+  }
 } catch (error) {
   failed = true;
   console.error(`FAIL: unexpected error: ${String(error)}`);
@@ -184,4 +349,6 @@ if (failed) {
   console.error('boundary check FAILED');
   process.exit(1);
 }
-console.log('boundary check passed: LLM SDK and worker violating fixtures caught, clean fixtures green');
+console.log(
+  'boundary check passed: LLM SDK, worker and facade violating fixtures caught, clean fixtures green',
+);
