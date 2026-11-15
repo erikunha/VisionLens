@@ -27,9 +27,18 @@ CAPABILITIES_SCHEMA_VERSION = 1
 # The modules each declared extra needs, by capability. The requirement
 # RANGES live in pyproject.toml; this map names what the environment is asked
 # about. The `all` extra is the union of the four capabilities.
+#
+# Every module named here is a module the extra INSTALLS: a map that named a
+# module the extra does not carry would report the extra as absent on a
+# machine that installed it, and the report is what a caller reads to know
+# what this build can do. The `training` extra carries the estimator stack
+# (scikit-learn, numpy and the reader of the frozen features, joblib) and
+# NOT torch: the estimator of the M0 rung is a scikit-learn logistic
+# regression over the frozen vectors of the encoder, and the torch of the
+# platform belongs to the encoder, behind the `vision` extra.
 EXTRA_CAPABILITY_MODULES: Mapping[str, tuple[str, ...]] = {
     "vision": ("torch", "transformers"),
-    "training": ("torch", "sklearn"),
+    "training": ("sklearn", "numpy", "joblib"),
     "agents": ("langgraph",),
     "server": ("fastapi", "uvicorn"),
 }

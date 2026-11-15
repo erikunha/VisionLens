@@ -219,7 +219,53 @@ def test_capabilities_report_the_extra_as_available_when_its_stack_is_there():
         assert "vision" in capabilities.installed_extras
     else:
         assert vision.missing_modules
-        assert capabilities.installed_extras == ()
+        # The assertion is about the VISION extra and not about every extra:
+        # the environment of this test carries the training extra, and a
+        # report that hides it would be a report that lies in the other
+        # direction.
+        assert "vision" not in capabilities.installed_extras
+
+
+def test_the_capability_map_names_only_what_the_extra_installs():
+    # The report says what the machine can do, and it may not claim more
+    # than the build carries: a map that names a module the extra does not
+    # install reports the extra as absent on a machine that installed it.
+    # The `training` extra carries the estimator stack and NOT torch, and
+    # the map that asked for torch made the report lie.
+    import tomllib
+    from pathlib import Path
+
+    import visionlens
+    from visionlens.capabilities import EXTRA_CAPABILITY_MODULES
+
+    root = Path(visionlens.__file__).resolve().parents[2]
+    pyproject_path = root / "pyproject.toml"
+    if not pyproject_path.is_file():
+        pytest.skip("the installed distribution does not ship its pyproject")
+    pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+
+    # The name of a distribution is not always the name of its module.
+    import_names = {"scikit-learn": "sklearn"}
+
+    for name, modules in EXTRA_CAPABILITY_MODULES.items():
+        requirements = extras.get(name, [])
+        if not requirements:
+            # A placeholder extra declares no stack yet: the map names the
+            # stack the capability will carry, and the report is honest
+            # because the modules are missing.
+            continue
+        installed = []
+        for requirement in requirements:
+            distribution = requirement.split("[")[0]
+            for separator in (">=", "<=", "==", ">", "<", "="):
+                distribution = distribution.split(separator)[0]
+            installed.append(import_names.get(distribution.strip(), distribution.strip()))
+        for module in modules:
+            assert module in installed, (
+                f"the extra '{name}' does not install '{module}', and the capability "
+                "map may not name a module the extra does not carry"
+            )
 
 
 # --- the image metadata operation ---------------------------------------------
