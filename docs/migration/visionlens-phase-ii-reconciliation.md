@@ -57,7 +57,7 @@ The extension is one decision with two halves.
 The first half is the CAPABILITY PACK: a declarative record of a task kind, of the data it
 accepts, of the preprocessing, of the inference strategy, of the evaluation algorithm, of the
 licence policy, of the hardware profile, of the evidence schema and of the export capabilities
-(`ARCHITECTURE-ADDENDUM.md:41`). A pack defines behavior options and not a competing engine.
+(`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:41`). A pack defines behavior options and not a competing engine.
 The proposed schema carries the constant `cvpack.proposed.v0`, an `$id` on `example.invalid` and
 the title "CapabilityPack proposal (not production contract)": it is illustrative, it has no
 versioning rule and it has no authority over the Zod schemas, over the SQLite store or over the
@@ -73,7 +73,7 @@ The third half is the STANDARD, and it is the part this repository cares about m
 per task and no universal score, the split unit as the real dependency unit, the mandatory
 failure slices, the inference failures inside the denominator, the separation of the score of
 the model from the calibrated confidence, the threshold of the promotion defined BEFORE the
-test, and the list of claims that are forbidden (`MASTER-SPEC.md:118`, `:138`).
+test, and the list of claims that are forbidden (`docs/vnext/extensions/computer-vision-2027/MASTER-SPEC.md:118`, `:138`).
 
 ## 3. The live tree the extension lands on
 
@@ -108,45 +108,47 @@ already took.
 
 | Ticket | Verdict | Evidence in the live tree | Note |
 |---|---|---|---|
-| VLCV-001 | KEEP | this report | the reconciliation is the ticket |
-| VLCV-002 | AMEND | `datasets/registry.json`, `python/visionlens/src/visionlens/encoders/weights.py` | the licence gate exists for MODELS; the data side needs it, as an extension of the same gate and not as a second one |
-| VLCV-003 | AMEND | `packages/core/src/benchmark/scorecard.ts`, `python/visionlens/src/visionlens/` | the scorecard IS the evaluator of one task kind; a task-kind aware suite is an extension, and the discriminated output union needs an ADR |
-| VLCV-004 | DEFER | `benchmarks/splits/visa-subset.v2.gold.json` | a second dataset with a rights review that did not happen; the VisA split is the current substrate |
+| VLCV-001 | AMEND | `docs/migration/vision-lens-vnext-reconciliation.md` | this report EXTENDS the canonical report and does not replace it; both are cited from the roadmap |
+| VLCV-002 | AMEND | `packages/core/src/benchmark/registry.ts:17`, `datasets/registry.json:34` | the licence gate exists for the DATA and for the MODELS (`assertDatasetLicensed`, `DATASET_USAGES` with `research-only`); what is missing is the conflicting-rights case, and it extends the gate instead of forking it |
+| VLCV-003 | AMEND | `packages/core/src/benchmark/scorecard.ts`, `packages/contracts/src/entities/evaluation.ts` | the scorecard IS the evaluator of one task kind; a task-kind aware suite is an extension, and the discriminated output union needs an ADR |
+| VLCV-004 | AMEND | `python/visionlens/src/visionlens/registry/dataset.py:24` | the manifest schema is a CLOSED one to extend; the dataset itself is not the next thing to build, and the rights review has to happen before any fetch |
 | VLCV-005 | AMEND | `python/visionlens/src/visionlens/training/probe.py` | the M0 rung exists; the majority baseline does not, and it is a one-line addition to the evaluator |
-| VLCV-006 | DEFER | `docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:6` | the PyTorch head is the M1 rung; the canonical ladder puts it two rungs above what ships |
-| VLCV-007 | DEFER | `packages/core/src/benchmark/calibration.ts` | the calibration exists; the abstention and the error explorer belong to the open stories of the canonical ticket |
-| VLCV-008 | DEFER | `packages/core/src/benchmark/splits.ts` | the near-duplicate guard is a stub hook; the pHash reference is a small ticket, but not the next one |
-| VLCV-009 | AMEND | `python/visionlens/src/visionlens/encoders/siglip2.py` | the IMAGE side of the encoder exists; the text side does not, and the extension must not fork the adapter |
-| VLCV-010 | DEFER | `packages/core/src/search/` | the retrieval of the repository is over text; the visual index does not exist |
+| VLCV-006 | CONFLICT | `docs/adr/023-probe-and-checkpoint.md`, `docs/vnext/12-TRAINING-EXPERIMENTS-MLFLOW.md:6` | the PyTorch head is the M1 rung, and ADR-023 decided that this rung is scikit-learn with no autograd; the ticket needs an ADR that supersedes that decision, or a change of scope |
+| VLCV-007 | AMEND | `packages/core/src/benchmark/calibration.ts` | the ECE calibration exists; the Brier, the risk-coverage curve and the error explorer extend it, and the abstention is new |
+| VLCV-008 | AMEND | `packages/core/src/analyzer/dedup.ts:27` | the perceptual hash and the Hamming distance exist, inside a burst scope; the pHash and the SHA reference extend them |
+| VLCV-009 | AMEND | `python/visionlens/src/visionlens/encoders/siglip2.py` | the IMAGE side of the encoder exists; the text tower does not, and the extension must not fork the adapter |
+| VLCV-010 | DEFER | `packages/core/src/search/index.ts` | the index of the repository is over text; the visual index is R3, which has no ticket yet |
 | VLCV-011 | DEFER | none | no segmentation anywhere in the tree |
 | VLCV-012 | DEFER | none | no matting and no RGBA export anywhere in the tree |
-| VLCV-013 | DEFER | `apps/studio/` is a placeholder | the Studio is not started (R6) |
-| VLCV-014 | DEFER | `packages/core/src/benchmark/` | no geometry contract exists |
+| VLCV-013 | DEFER | `apps/studio/src/index.ts` is a placeholder | the Studio is not started (R6), and the ticket of the Studio slice has to land first |
+| VLCV-014 | DEFER | `docs/vnext/10-INGEST-CURATION-ANNOTATION.md:15` | the rule of the geometry is already decided; no export code exists |
 | VLCV-015 | DEFER | none | no detector adapter exists |
 | VLCV-016 | DEFER | none | the AGPL decision of the YOLO weights is not taken |
 | VLCV-017 | DEFER | `packages/core/src/benchmark/scorecard.ts` | the scorecard has no detection family |
 | VLCV-018 | DEFER | the arena of R4 has no ticket | the model arena is not started |
-| VLCV-019 | DEFER | none | no PPE ontology exists |
-| VLCV-020 | DEFER | none | no person-equipment association exists |
-| VLCV-021 | DEFER | none | no video ingest exists |
+| VLCV-019 | DEFER | `packages/contracts/src/entities/ontology.ts`, `packages/core/src/classifier/rules.ts` | the ontology entity is generic; no PPE taxonomy and no reviewer guide exist |
+| VLCV-020 | DEFER | `packages/core/src/reviewer/index.ts` | the human review path exists generically; the person-equipment association does not |
+| VLCV-021 | DEFER | `packages/contracts/src/entities/reserved.ts:15` | the names `track` and `frame` are reserved and their activation is gated; no video ingest exists |
 | VLCV-022 | DEFER | none | no tracking exists |
 | VLCV-023 | DEFER | none | no event engine exists |
 | VLCV-024 | DEFER | none | no counting evaluator exists |
 | VLCV-025 | DEFER | none | no synthetic generator exists |
 | VLCV-026 | DEFER | none | no OCR pipeline exists |
-| VLCV-027 | DEFER | none | no ALPR evaluator exists |
-| VLCV-028 | DEFER | none | the governance of a restricted data access does not exist |
-| VLCV-029 | DEFER | none | no multilabel evaluation exists |
+| VLCV-027 | DEFER | `datasets/registry.json:34` | the `research-only` usage of a dataset is a precedent of the registry; no ALPR evaluator exists |
+| VLCV-028 | CONFLICT | `ROADMAP.md`, the table of what is not built | the repository EXCLUDES the medical imaging vertical; the ticket asks to enter it and needs a dated amendment of that table |
+| VLCV-029 | CONFLICT | the same exclusion | the excluded vertical, a patient-level split and a multilabel evaluation; the decision is the same one as the ticket of the governance |
 | VLCV-030 | DEFER | none | no grounding spike exists |
 | VLCV-031 | DEFER | none | no video mask exists |
 | VLCV-032 | DEFER | none | no document OCR exists |
 | VLCV-033 | DEFER | the anomaly work of the active learning ticket is open | the hypothesis of the lab is research, and the research is not the next thing |
 
-The matrix is deliberately flat, and that is the finding: of the 33 tickets, THREE are KEEP or
-AMEND (the reconciliation, the licence policy and the task contract audit), TWO more are AMEND
-(the classification baseline and the embedding adapter) and the other TWENTY-EIGHT are DEFER.
-The extension is not a backlog the repository can run next. It is a scope, an order and a
-standard.
+The matrix is deliberately flat, and that is the finding: of the 33 tickets, EIGHT are AMEND (the
+reconciliation itself, the licence and provenance policy, the task contract audit, the dataset
+manifest, the classification baseline, the calibration, the near-duplicate reference and the
+embedding adapter), THREE are CONFLICT (the PyTorch head and the two tickets of the chest
+radiograph) and the other TWENTY-TWO are DEFER. NONE is KEEP: there is no ticket of the
+extension that the repository answers as it is today. The extension is not a backlog the
+repository can run next. It is a scope, an order and a standard.
 
 ## 5. The conflicting decisions
 
@@ -155,7 +157,7 @@ an explicit decision of the maintainer, and none of them may be resolved by an e
 extension.
 
 1. **The MCP tool codes.** The extension proposes `dataset.inspect` as a tool of the investigator
-   surface (`ARCHITECTURE-ADDENDUM.md:145`). The frozen protocol says the three catalog codes
+   surface (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:145`). The frozen protocol says the three catalog codes
    "MUST NOT be accepted in v1" (`packages/contracts/src/worker/protocol.ts:62`), and
    `experiment.compare` is not a code anywhere in the repository. The conflict is with the wire
    of v1, and the wire does not move without a major version.
@@ -163,12 +165,12 @@ extension.
    `tracking` (HOTA and IDF1), `matting` and `medical-research`, and the proposed schema has
    none of the three: it offers `image.ppe` and `video.counting`, which the evaluator section
    never defines. An implementer cannot tell which family a pack belongs to.
-3. **`MISSING_EXTRA` is claimed not to exist** (`ARCHITECTURE-ADDENDUM.md:80`) and it exists in
+3. **`MISSING_EXTRA` is claimed not to exist** (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:80`) and it exists in
    the frozen vocabulary (`packages/contracts/src/worker/protocol.ts:86` and
    `python/visionlens/src/visionlens/errors.py`). The extension was written against a state of
    the tree that the tree never had.
 4. **`taskKind` and `outputSchemaVersion` in the envelope** are a change of the guarded wire
-   shape (`ARCHITECTURE-ADDENDUM.md:101`), and the protocol requires a MAJOR `CONTRACTS_VERSION`
+   shape (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:101`), and the protocol requires a MAJOR `CONTRACTS_VERSION`
    bump for that.
 5. **The vocabulary of the safety tier collides.** The extension uses `safetyTier` with the
    values standard, personal-data, safety-sensitive and restricted-medical, and the repository
@@ -178,7 +180,7 @@ extension.
 Two more divergences, of a different kind:
 
 6. **The CLI alias that the extension lists as unchanged is gone.** The extension names the CLI
-   aliases among the things not to change now (`ARCHITECTURE-ADDENDUM.md:35`), and this
+   aliases among the things not to change now (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:35`), and this
    repository removed the deprecated alias of the earlier bin name on 2026-11-15 (PR #54), because
    the CLI package was never published and no published consumer depended on it. The extension
    was written against the tree of 2026-11-11, and this repository is ahead of it.
@@ -192,7 +194,7 @@ Two more divergences, of a different kind:
 The extension is explicit that it does not supersede ADR-011 to ADR-018, that it does not change
 the persistence of `packages/core`, the outputs of `@vision-lens/contracts`, the snapshots, the
 major version of the JSONL wire, the compatibility of the exports of `@vision-lens/sdk`, the
-VisA data sets and the scripts (`ARCHITECTURE-ADDENDUM.md:3`, `:35`). The rule of the
+VisA data sets and the scripts (`docs/vnext/extensions/computer-vision-2027/ARCHITECTURE-ADDENDUM.md:3`, `:35`). The rule of the
 evolution of a contract is the one the repository already follows and already states more
 strictly: a new discriminated variant with a version bump, the readers migrated BEFORE the
 persisted data of that type is written, and a field added only when no adequate field exists
