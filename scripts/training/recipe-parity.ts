@@ -135,18 +135,30 @@ function checkRecipe(label: string, recipe: Record<string, unknown>): boolean {
 }
 
 /**
- * The weights of the numeric regime: every class carries a number.
+ * The weights of the numeric regime, as the TEXT the resolver reads.
  *
- * The numbers are not all the same, and half of them are fractional, so a
- * weight that arrives as the text of a number is caught whichever way it
- * was written.
+ * The text is written by hand because a number that JavaScript cannot hold
+ * exactly is a number JavaScript rounds before it writes it: the regime
+ * needs the exact integer to reach the Python side, or the two sides never
+ * see the number the regime is about.
+ *
+ * The numbers are not all the same, half of them are fractional, and one of
+ * them is an integer that is not exactly a double, so a weight that arrives
+ * as the text of a number is caught whichever way it was written and a
+ * number that the other side rounds is caught too.
  */
-function numericWeights(labelKeys: readonly string[]): Record<string, number> {
-  const weights: Record<string, number> = {};
-  labelKeys.forEach((labelKey, index) => {
-    weights[labelKey] = index % 2 === 0 ? index + 1 : index + 0.5;
+function numericWeightsText(labelKeys: readonly string[]): string {
+  const parts = labelKeys.map((labelKey, index) => {
+    const value =
+      index === 0
+        ? // 2**53 + 1 is not exactly a double: JavaScript holds it as
+          // 9007199254740992, so the two sides have to write the same text
+          // for it or they compute two addresses for one configuration.
+          '9007199254740993'
+        : String(index % 2 === 0 ? index + 1 : index + 0.5);
+    return `${JSON.stringify(labelKey)}: ${value}`;
   });
-  return weights;
+  return `{${parts.join(', ')}}`;
 }
 
 function main(): number {
@@ -171,11 +183,7 @@ function main(): number {
   const scratch = mkdtempSync(path.join(tmpdir(), 'visionlens-recipe-parity-'));
   try {
     const weightsFile = path.join(scratch, 'class-weights.json');
-    writeFileSync(
-      weightsFile,
-      JSON.stringify(numericWeights(labelKeys)),
-      'utf8',
-    );
+    writeFileSync(weightsFile, numericWeightsText(labelKeys), 'utf8');
 
     const numeric = resolveOnPython(weightsFile);
     if (!numeric.ok) {

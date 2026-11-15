@@ -87,7 +87,10 @@ of the tree recorded below.
    `none` and the numeric one where every class carries a number: a gate that
    looked at one regime would let the other one rot, and a weight that
    crosses the boundary as the text of a number satisfies the regime of
-   `none` perfectly.
+   `none` perfectly. The numeric regime carries an integer that is not
+   exactly a double, because a number JavaScript cannot hold reaches the
+   other side rounded and the two sides have to write the SAME text for it
+   or they compute two addresses for one configuration.
 4. The schema of the TypeScript side is STRICT, like the manifest of the
    adapter: a recipe with a field nobody knows is a recipe nobody
    maintains, and a field one side knows and the other does not is a hole in
