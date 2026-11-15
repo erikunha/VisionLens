@@ -102,9 +102,12 @@ ABSOLUTE_PATH_PATTERNS = (b"/" + b"Users" + b"/", b"/home/", b"/private/var/")
 IMPORT_CHECK = (
     # The training surface is imported as well: the package does not import
     # it at the top level, and a purity proof that cannot see a surface is a
-    # purity proof that proves nothing about it.
+    # purity proof that proves nothing about it. Every module of the training
+    # surface is named, because a module nobody imports is a module nobody
+    # proved.
     "import pathlib, sys, visionlens, visionlens.training\n"
     "import visionlens.training.probe, visionlens.training.checkpoint\n"
+    "import visionlens.training.features, visionlens.training.trainer\n"
     "assert visionlens.__version__ == '0.1.0', visionlens.__version__\n"
     "assert (pathlib.Path(visionlens.__file__).parent / 'py.typed').exists()\n"
     "heavy = [m for m in "
