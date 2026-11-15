@@ -49,6 +49,7 @@ from ..registry.loader import ModelRegistryError, ModelNotFoundError, resolve_mo
 from ..registry.loader import load_model_registry
 from ..registry.record import ModelRecord, ModelRecordError
 from ..runtime.fingerprint import canonical_json, fingerprint_v2, utf16_order
+from .recipe_schema import validate_recipe_against_schema
 
 #: The version of the shape of the recipe itself.
 RECIPE_VERSION = "1.0.0"
@@ -117,10 +118,6 @@ ENCODER_PIN_FIELDS: Tuple[str, ...] = (
     "trustPolicy",
     "attribution",
 )
-
-#: The pin fields whose value may be empty, because the record lets them be
-#: empty. The record owns the rule, and the pin inherits it.
-EMPTY_ALLOWED_PIN_FIELDS: Tuple[str, ...] = ("usageRestrictions",)
 
 #: The fields the dataset pin carries, and nothing else.
 DATASET_PIN_FIELDS: Tuple[str, ...] = (
@@ -272,7 +269,8 @@ class TrainRecipe:
             "encoder": self.encoder.to_dict(),
             "dataset": self.dataset.to_dict(),
             "partitions": {
-                name: sorted(ids) for name, ids in sorted(self.partitions.items())
+                name: sorted(ids, key=utf16_order)
+                for name, ids in sorted(self.partitions.items())
             },
             "ontologyVersion": self.ontology_version,
             "classWeights": dict(sorted(self.class_weights.items())),
@@ -320,8 +318,41 @@ def ontology_version_of(label_keys: Sequence[str]) -> str:
     The ontology of a probe is its CLASS SPACE: the set of label keys the
     run may answer with. The digest covers the sorted keys, so a recipe
     whose class space changed has another fingerprint.
+
+    The keys are sorted over their UTF-16 code units, the way the other
+    side sorts them, so the two sides compute the same version of the same
+    class space.
     """
-    return fingerprint_v2({"labelKeys": sorted(set(label_keys))})
+    return fingerprint_v2({"labelKeys": sorted(set(label_keys), key=utf16_order)})
+
+
+def manifest_hash_of(manifest: Mapping[str, Any]) -> str:
+    """The hash of a manifest, recomputed.
+
+    The hash covers the WHOLE manifest (the seed, the ratios, the notes and
+    the assignments, with the label and the digest of every item), so it is
+    the address of the labelled data and not of the bookkeeping alone.
+
+    The TypeScript side computes the same digest over the same payload
+    (`packages/core/src/benchmark/splits.ts`, `computeManifestHash`), and the
+    recipe recomputes it because it holds the whole manifest: a split whose
+    declared hash does not describe its own items is a split that names a
+    snapshot it does not have.
+    """
+    payload: Dict[str, Any] = {
+        "schemaVersion": manifest.get("schemaVersion"),
+        "id": manifest.get("id"),
+        "datasetId": manifest.get("datasetId"),
+        "seed": manifest.get("seed"),
+        "ratios": manifest.get("ratios"),
+        "strata": manifest.get("strata"),
+        "assignments": manifest.get("assignments"),
+        "notes": manifest.get("notes"),
+    }
+    for name in ("strategy", "partitionFingerprint", "groupBasis"):
+        if manifest.get(name) is not None:
+            payload[name] = manifest[name]
+    return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
 def partition_fingerprint_of(assignments: Sequence[Mapping[str, Any]]) -> str:
@@ -361,27 +392,6 @@ def _read_json(path: str) -> Any:
         ) from error
 
 
-def _checked_pin(pin: EncoderPin) -> EncoderPin:
-    """The pin, checked against the fields it has to carry.
-
-    A pin field with no value is a field of the encoder the run does not
-    pin, and the other side refuses such a recipe. The fields the record
-    lets be empty are exempt, because a rule the recipe holds to a
-    stricter shape than the record refuses a model the platform may run.
-    """
-    for name in ENCODER_PIN_FIELDS:
-        if name in EMPTY_ALLOWED_PIN_FIELDS:
-            continue
-        value = pin.to_dict()[name]
-        _require(
-            value not in (None, "", [], (), {}),
-            "RECIPE_ENCODER_FIELD_MISSING",
-            f"encoder.{name}",
-            "the record carries no value for this field, and a recipe may not invent one",
-        )
-    return pin
-
-
 def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
     """The pin of a resolved registry record.
 
@@ -389,33 +399,36 @@ def _encoder_pin_of(record: ModelRecord) -> EncoderPin:
     the name the record gives it: the recipe does not decide what a model
     is, it decides what a run will use. The NOTES of the record are the
     provenance of the record itself, and they travel with the record.
+
+    The shape of the pin is the shape of the contract, and the schema owns
+    it: the record owns the shape of the record and the schema owns the
+    shape of the recipe, so a rule that is checked in two places is a rule
+    that is checked in two places and drifts.
     """
     # The floating revision is refused by the RECORD, in one place, and the
     # recipe inherits that refusal: a rule that is checked twice is a rule
     # that is checked in two places and drifts.
     width, height = record.input_image_size
-    return _checked_pin(
-        EncoderPin(
-            model_id=record.model_id,
-            revision=record.revision,
-            source_uri=record.source_uri,
-            source_digest=record.source_digest,
-            license=record.license,
-            license_url=record.license_url,
-            commercial_use=record.commercial_use,
-            usage_restrictions=record.usage_restrictions,
-            required_extras=tuple(record.required_extras),
-            tasks=tuple(record.tasks),
-            preprocessing_fingerprint=record.preprocessing_fingerprint,
-            device_support=tuple(record.device_support),
-            input_image_size={"width": width, "height": height},
-            feature_extractor=record.feature_extractor,
-            output_shape={"dimension": record.output_dimension},
-            latency_cost_profile=record.latency_cost_profile,
-            calibration_status=record.calibration_status,
-            trust_policy=record.trust_policy,
-            attribution=record.attribution,
-        )
+    return EncoderPin(
+        model_id=record.model_id,
+        revision=record.revision,
+        source_uri=record.source_uri,
+        source_digest=record.source_digest,
+        license=record.license,
+        license_url=record.license_url,
+        commercial_use=record.commercial_use,
+        usage_restrictions=record.usage_restrictions,
+        required_extras=tuple(record.required_extras),
+        tasks=tuple(record.tasks),
+        preprocessing_fingerprint=record.preprocessing_fingerprint,
+        device_support=tuple(record.device_support),
+        input_image_size={"width": width, "height": height},
+        feature_extractor=record.feature_extractor,
+        output_shape={"dimension": record.output_dimension},
+        latency_cost_profile=record.latency_cost_profile,
+        calibration_status=record.calibration_status,
+        trust_policy=record.trust_policy,
+        attribution=record.attribution,
     )
 
 
@@ -522,6 +535,29 @@ def _label_keys_of(split: Mapping[str, Any]) -> Tuple[str, ...]:
     return tuple(sorted(set(keys)))
 
 
+def _checked_against_schema(record: Mapping[str, Any]) -> None:
+    """The recipe, checked against the schema of the contract.
+
+    The schema is the file the other side validates with, and this side
+    reads the same file, so the two sides refuse the same recipes: a recipe
+    the other side refuses never crosses the boundary. The rules the
+    resolver checks by hand live here as well, because a rule that is
+    checked in two places is a rule that is checked in two places and
+    drifts.
+    """
+    issues = validate_recipe_against_schema(record)
+    if not issues:
+        return
+    first = issues[0]
+    field = first.split(":", 1)[0].removeprefix("(root).") or "recipe"
+    raise RecipeError(
+        "RECIPE_RECORD_INVALID",
+        field,
+        "the recipe does not satisfy the schema of the contract: "
+        + "; ".join(issues[:5]),
+    )
+
+
 def _checked_run(recipe: TrainRecipe) -> TrainRecipe:
     """The recipe, checked against the rules the other side enforces.
 
@@ -538,20 +574,20 @@ def _checked_run(recipe: TrainRecipe) -> TrainRecipe:
     _require(
         isinstance(recipe.max_epochs, int)
         and not isinstance(recipe.max_epochs, bool)
-        and recipe.max_epochs > 0,
+        and 0 < recipe.max_epochs <= MAX_SAFE_INTEGER,
         "RECIPE_EPOCHS_INVALID",
         "maxEpochs",
-        f"the ceiling of the epochs is a whole number above zero, got "
-        f"{recipe.max_epochs!r}",
+        f"the ceiling of the epochs is a whole number the other side holds exactly, above "
+        f"zero and at most {MAX_SAFE_INTEGER}, got {recipe.max_epochs!r}",
     )
     _require(
         isinstance(recipe.checkpoint_interval, int)
         and not isinstance(recipe.checkpoint_interval, bool)
-        and recipe.checkpoint_interval > 0,
+        and 0 < recipe.checkpoint_interval <= MAX_SAFE_INTEGER,
         "RECIPE_CHECKPOINT_INTERVAL_INVALID",
         "checkpointInterval",
-        f"the interval of the checkpoints is a whole number above zero, got "
-        f"{recipe.checkpoint_interval!r}",
+        f"the interval of the checkpoints is a whole number the other side holds exactly, "
+        f"above zero and at most {MAX_SAFE_INTEGER}, got {recipe.checkpoint_interval!r}",
     )
     _require(
         isinstance(recipe.seed, int)
@@ -750,6 +786,20 @@ def resolve_recipe(
         "does not have is a split whose snapshot is a name",
     )
 
+    # The hash of the manifest covers the LABELS of the items and not only
+    # the bookkeeping of the split, and the recipe holds the whole manifest,
+    # so the recipe recomputes it: two runs on the same items with different
+    # labels are two different runs and must not share an address.
+    recomputed_manifest = manifest_hash_of(split)
+    _require(
+        dataset.manifest_hash == recomputed_manifest,
+        "RECIPE_MANIFEST_MISMATCH",
+        "dataset.manifestHash",
+        f"the split declares the hash {dataset.manifest_hash} and its own manifest digests "
+        f"to {recomputed_manifest}; a split that names a manifest it does not have is a "
+        "split whose data is a name",
+    )
+
     recipe = _checked_run(
         TrainRecipe(
             encoder=encoder,
@@ -772,7 +822,9 @@ def resolve_recipe(
         )
     )
     fingerprint = recipe_fingerprint(recipe)
-    return TrainRecipe(**{**recipe.__dict__, "fingerprint": fingerprint})
+    published = TrainRecipe(**{**recipe.__dict__, "fingerprint": fingerprint})
+    _checked_against_schema(published.to_record())
+    return published
 
 
 def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
@@ -810,33 +862,37 @@ def recipe_from_record(record: Mapping[str, Any]) -> TrainRecipe:
             f"the recipe record carries fields nobody knows: {', '.join(unknown)}; a "
             "recipe with a field nobody maintains is a recipe nobody maintains",
         )
-    encoder = _checked_pin(
-        EncoderPin(
-            model_id=str(record["encoder"]["modelId"]),
-            revision=str(record["encoder"]["revision"]),
-            source_uri=str(record["encoder"]["sourceUri"]),
-            source_digest=str(record["encoder"]["sourceDigest"]),
-            license=str(record["encoder"]["license"]),
-            license_url=str(record["encoder"]["licenseUrl"]),
-            commercial_use=bool(record["encoder"]["commercialUse"]),
-            usage_restrictions=str(record["encoder"]["usageRestrictions"]),
-            required_extras=tuple(record["encoder"]["requiredExtras"]),
-            tasks=tuple(record["encoder"]["tasks"]),
-            preprocessing_fingerprint=str(record["encoder"]["preprocessingFingerprint"]),
-            device_support=tuple(record["encoder"]["deviceSupport"]),
-            input_image_size={
-                "width": int(record["encoder"]["inputImageSize"]["width"]),
-                "height": int(record["encoder"]["inputImageSize"]["height"]),
-            },
-            feature_extractor=str(record["encoder"]["featureExtractor"]),
-            output_shape={
-                "dimension": int(record["encoder"]["outputShape"]["dimension"])
-            },
-            latency_cost_profile=str(record["encoder"]["latencyCostProfile"]),
-            calibration_status=str(record["encoder"]["calibrationStatus"]),
-            trust_policy=str(record["encoder"]["trustPolicy"]),
-            attribution=str(record["encoder"]["attribution"]),
-        )
+    # The shape of the record is the shape of the contract, and the other
+    # side refuses a record that does not have it. The schema is read here,
+    # so a record the other side refuses is refused here too, before the
+    # record is rebuilt: a value this side coerces into the shape the other
+    # side accepts is a value the two sides judge differently.
+    _checked_against_schema(record)
+    encoder = EncoderPin(
+        model_id=str(record["encoder"]["modelId"]),
+        revision=str(record["encoder"]["revision"]),
+        source_uri=str(record["encoder"]["sourceUri"]),
+        source_digest=str(record["encoder"]["sourceDigest"]),
+        license=str(record["encoder"]["license"]),
+        license_url=str(record["encoder"]["licenseUrl"]),
+        commercial_use=bool(record["encoder"]["commercialUse"]),
+        usage_restrictions=str(record["encoder"]["usageRestrictions"]),
+        required_extras=tuple(record["encoder"]["requiredExtras"]),
+        tasks=tuple(record["encoder"]["tasks"]),
+        preprocessing_fingerprint=str(record["encoder"]["preprocessingFingerprint"]),
+        device_support=tuple(record["encoder"]["deviceSupport"]),
+        input_image_size={
+            "width": int(record["encoder"]["inputImageSize"]["width"]),
+            "height": int(record["encoder"]["inputImageSize"]["height"]),
+        },
+        feature_extractor=str(record["encoder"]["featureExtractor"]),
+        output_shape={
+            "dimension": int(record["encoder"]["outputShape"]["dimension"])
+        },
+        latency_cost_profile=str(record["encoder"]["latencyCostProfile"]),
+        calibration_status=str(record["encoder"]["calibrationStatus"]),
+        trust_policy=str(record["encoder"]["trustPolicy"]),
+        attribution=str(record["encoder"]["attribution"]),
     )
     dataset = DatasetPin(
         dataset_id=str(record["dataset"]["datasetId"]),

@@ -377,8 +377,8 @@ def test_a_split_without_the_fingerprint_of_its_snapshot_is_refused(
 def test_a_record_with_an_empty_field_the_pin_needs_is_refused() -> None:
     """A pin field with no value is a field the run does not pin.
 
-    The other side refuses such a recipe, and the read-back path refuses
-    it too, so the two sides judge the same wire form the same way.
+    The schema of the contract owns the shape of the recipe, and the other
+    side refuses such a recipe, so this side refuses it too.
     """
     recipe = resolve_tracked()
     record = recipe.to_record()
@@ -387,8 +387,8 @@ def test_a_record_with_an_empty_field_the_pin_needs_is_refused() -> None:
     with pytest.raises(RecipeError) as failure:
         recipe_from_record(record)
 
-    assert failure.value.code == "RECIPE_ENCODER_FIELD_MISSING"
-    assert failure.value.field == "encoder.featureExtractor"
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+    assert "featureExtractor" in failure.value.reason
 
 
 def test_the_floating_revision_is_refused_and_names_the_field(tmp_path: Path) -> None:
@@ -437,25 +437,28 @@ def test_a_model_whose_usage_restrictions_are_empty_is_pinned(
     assert recipe.encoder.usage_restrictions == ""
 
 
-def test_the_address_does_not_depend_on_the_order_of_the_items(tmp_path: Path) -> None:
-    """A partition is a set of ids, so the order they were written in is not
+def test_the_address_does_not_depend_on_the_order_of_the_ids() -> None:
+    """A partition is a set of ids, so the order the ids arrived in is not
     part of the configuration.
 
-    The fingerprint of the partition is the digest of the sorted pairs, so a
-    split whose items were written in another order is the same split, and
-    two runs of the same configuration share the address.
+    The other side sorts the ids the same way, so the two sides compute the
+    address of the same body whatever order the ids were written in.
     """
-    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
-    shuffled = copy.deepcopy(split)
-    shuffled["assignments"] = list(reversed(shuffled["assignments"]))
-    target = tmp_path / "shuffled.json"
-    target.write_text(json.dumps(shuffled), encoding="utf-8")
+    recipe = resolve_tracked()
+    body = recipe.to_dict()
 
-    base = resolve_tracked()
-    other = resolve_tracked(split_path=str(target))
+    for name, ids in body["partitions"].items():
+        assert ids == sorted(ids)
 
-    assert other.dataset.snapshot_fingerprint == base.dataset.snapshot_fingerprint
-    assert other.fingerprint == base.fingerprint
+    shuffled = TrainRecipe(
+        **{
+            **recipe.__dict__,
+            "partitions": {
+                name: tuple(reversed(ids)) for name, ids in recipe.partitions.items()
+            },
+        }
+    )
+    assert recipe_fingerprint(shuffled) == recipe.fingerprint
 
 
 def test_a_record_with_a_field_nobody_knows_is_refused() -> None:
@@ -520,10 +523,108 @@ def test_a_run_with_an_empty_augmentation_is_refused() -> None:
 def test_a_seed_the_other_side_cannot_hold_exactly_is_refused() -> None:
     """A seed above the safe range reaches the other side rounded."""
     with pytest.raises(RecipeError) as failure:
-        resolve_tracked(seed=9007199254740993)
+        resolve_tracked(seed=9007199254740992)
 
     assert failure.value.code == "RECIPE_SEED_INVALID"
     assert failure.value.field == "seed"
+
+
+def test_a_split_that_names_a_manifest_it_does_not_have_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The hash of the manifest covers the LABELS of the items.
+
+    Two runs on the same items with different labels are two different
+    runs, and the hash of the manifest is what tells them apart.
+    """
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    relabelled = copy.deepcopy(split)
+    item = next(a for a in relabelled["assignments"] if a["anomaly"] == "normal")
+    # The label key of a normal item is 'normal' whatever its class is, so
+    # the class space of the ontology does not change: only the data does.
+    item["class"] = "another-class"
+    target = tmp_path / "relabelled.json"
+    target.write_text(json.dumps(relabelled), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_MANIFEST_MISMATCH"
+    assert failure.value.field == "dataset.manifestHash"
+
+
+def test_a_ceiling_of_epochs_the_other_side_cannot_hold_is_refused() -> None:
+    """A whole number above the range of the other side is refused."""
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(max_epochs=9007199254740992)
+
+    assert failure.value.code == "RECIPE_EPOCHS_INVALID"
+    assert failure.value.field == "maxEpochs"
+
+
+def test_a_checkpoint_interval_the_other_side_cannot_hold_is_refused() -> None:
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(checkpoint_interval=9007199254740992)
+
+    assert failure.value.code == "RECIPE_CHECKPOINT_INTERVAL_INVALID"
+
+
+def test_a_record_with_a_partition_nobody_knows_is_refused() -> None:
+    """The nested objects are strict as well.
+
+    The other side refuses a record whose partitions name a partition it
+    does not know, and this side refuses it too.
+    """
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["partitions"]["holdout"] = ["candle/Data/Images/Normal/0002.JPG"]
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+    assert "holdout" in failure.value.reason
+
+
+def test_a_record_without_a_partition_is_refused() -> None:
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    del record["partitions"]["test"]
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+
+
+def test_a_record_of_a_version_this_side_does_not_implement_is_refused() -> None:
+    """A recipe of a future version is not a recipe this side reads."""
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["recipeVersion"] = "2.0.0"
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+    assert "recipeVersion" in failure.value.reason
+
+
+def test_a_record_whose_commercial_use_is_text_is_refused() -> None:
+    """A flag written as text is a flag the two sides read differently.
+
+    The text 'false' is a truthy string, and a record that says the
+    commercial use is not permitted must not be read as permitted.
+    """
+    recipe = resolve_tracked()
+    record = recipe.to_record()
+    record["encoder"]["commercialUse"] = "false"
+
+    with pytest.raises(RecipeError) as failure:
+        recipe_from_record(record)
+
+    assert failure.value.code == "RECIPE_RECORD_INVALID"
+    assert "commercialUse" in failure.value.reason
 
 
 def test_a_class_without_a_documented_weight_is_refused() -> None:

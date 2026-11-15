@@ -7,6 +7,10 @@
  * same Zod schema the TypeScript side validates with, so the two can never
  * drift, and the Python side validates against the generated file.
  *
+ * The file travels WITH the Python package, because the side that reads it
+ * is the side that resolves the recipe: a validator that needs a path the
+ * wheel does not carry is a validator that only runs in the repository.
+ *
  * It is the same mechanism the manifest of the adapter uses
  * (`scripts/benchmarks/generate-manifest-schema.ts`), for the recipe.
  *
@@ -25,9 +29,10 @@ import { trainRecipeJsonSchema } from '../../packages/core/src/training/index.js
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const schemaPath = path.join(
   repoRoot,
-  'packages',
-  'core',
+  'python',
+  'visionlens',
   'src',
+  'visionlens',
   'training',
   'train-recipe.schema.json',
 );
