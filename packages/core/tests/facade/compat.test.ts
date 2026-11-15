@@ -13,6 +13,10 @@ import { LLMProvider, resolvePythonRouteConfig } from '../../src/config/index.js
  * gains exactly one subpath, and the provider vocabulary keeps its eight
  * names. The legacy path is not re-pointed at anything, so a consumer that
  * imports the root today keeps working.
+ *
+ * The list of the subpaths is the FROZEN surface of the core: it moves
+ * when a new surface lands, and the move is recorded here, so the surface
+ * can never grow without the test noticing.
  */
 const CORE_ROOT_EXPORTS = [
   'WorkerClient',
@@ -48,6 +52,7 @@ const CORE_EXPORT_SUBPATHS = [
   './search',
   './search/query',
   './store',
+  './training',
   './types',
   './utils/logger',
 ];
@@ -75,7 +80,7 @@ describe('the compatibility of the facade with the shipped surface', () => {
     expect(names).not.toContain('FacadeError');
   });
 
-  it('adds exactly one subpath to the exports map of the core', async () => {
+  it('keeps the exports map of the core frozen', async () => {
     const manifest = JSON.parse(
       await readFile(
         join(fileURLToPath(new URL('.', import.meta.url)), '..', '..', 'package.json'),
