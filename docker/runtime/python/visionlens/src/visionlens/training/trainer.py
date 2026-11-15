@@ -61,7 +61,7 @@ it cannot be reproduced:
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
@@ -435,18 +435,29 @@ def train(
 
     for epoch in range(1, max_epochs + 1):
         started = time.perf_counter()
-        model = fit_probe_from_recipe(recipe, train_vectors, train_labels)
+        # The fit predicts NOTHING: the first prediction of the run belongs
+        # to the run, and a fit that predicts first makes the cold read a
+        # warm number.
+        model = fit_probe_from_recipe(
+            recipe, train_vectors, train_labels, compute_train_accuracy=False
+        )
         fit_seconds += time.perf_counter() - started
         if epoch == 1:
             # The cold read is the FIRST prediction of the run: it is timed
             # here, before the curve reads the model, so it is a cold number
             # and not the first of a population of warm ones.
             cold_read_ms = _cold_read_of(model, val_vectors)
+        train_accuracy = _accuracy_of(model, train_vectors, train_labels)
+        val_accuracy = _accuracy_of(model, val_vectors, val_labels)
+        # The checkpoint carries the accuracy of the train partition, and
+        # the fit did not compute it: the run does, and the run is the one
+        # that measured the cold read.
+        model = replace(model, train_accuracy=train_accuracy)
         curve.append(
             EpochPoint(
                 epoch=epoch,
-                train_accuracy=_accuracy_of(model, train_vectors, train_labels),
-                val_accuracy=_accuracy_of(model, val_vectors, val_labels),
+                train_accuracy=train_accuracy,
+                val_accuracy=val_accuracy,
             )
         )
         if epoch % checkpoint_interval == 0 or epoch == max_epochs:

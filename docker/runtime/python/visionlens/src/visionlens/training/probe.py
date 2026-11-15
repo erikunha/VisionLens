@@ -671,12 +671,19 @@ def fit_probe(
     solver: str = "lbfgs",
     max_epochs: int = 200,
     class_weights: Mapping[str, Any] | None = None,
+    compute_train_accuracy: bool = True,
 ) -> ProbeModel:
     """Fits the probe of the M0 rung over the frozen features of a run.
 
     The fit is the logistic regression of scikit-learn over the vectors of
     the `train` partition, with the seed, the optimizer, the hyperparameters,
     the ceiling of the epochs and the documented class weights of the recipe.
+
+    `compute_train_accuracy` is False for the caller that measures the
+    accuracy itself: the fit then predicts NOTHING, so the first prediction
+    of the run belongs to the caller and the cold read of the run is a cold
+    number. The model of a fit without the accuracy carries zero, and the
+    caller is the one that fills it.
 
     @raises MissingExtraError when the heavy stack is not installed.
     @raises ProbeError when the run cannot be fitted.
@@ -762,10 +769,15 @@ def fit_probe(
         train_accuracy=0.0,
     )
     correct = 0
-    for vector, label_key in zip(features, labels):
-        if model.predict(vector) == label_key:
-            correct += 1
-    return replace(model, train_accuracy=correct / len(features))
+    if compute_train_accuracy:
+        for vector, label_key in zip(features, labels):
+            if model.predict(vector) == label_key:
+                correct += 1
+        return replace(model, train_accuracy=correct / len(features))
+    # The caller measures the accuracy itself, and the first prediction of
+    # the run belongs to the caller: a fit that predicts is a fit that
+    # makes the cold read of the run a warm number.
+    return model
 
 
 def _symmetric_parameters(
@@ -841,12 +853,18 @@ def fit_probe_from_recipe(
     recipe: TrainRecipe,
     features: Sequence[Sequence[float]],
     labels: Sequence[str],
+    *,
+    compute_train_accuracy: bool = True,
 ) -> ProbeModel:
     """Fits the probe of a pinned recipe.
 
     Everything the fit is decided by comes from the recipe: the class space,
     the seed, the optimizer, the hyperparameters, the ceiling of the epochs
     and the documented class weights.
+
+    `compute_train_accuracy` is False for the caller that measures the
+    accuracy itself, so that the first prediction of the run belongs to the
+    caller.
 
     @raises MissingExtraError when the heavy stack is not installed.
     @raises ProbeError when the run cannot be fitted.
@@ -866,4 +884,5 @@ def fit_probe_from_recipe(
         solver=recipe.optimizer,
         max_epochs=recipe.max_epochs,
         class_weights=recipe.class_weights,
+        compute_train_accuracy=compute_train_accuracy,
     )
