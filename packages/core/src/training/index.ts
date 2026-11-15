@@ -20,6 +20,7 @@ export {
   TrainRecipeSchema,
   ontologyVersionOf,
   trainRecipeFingerprint,
+  trainRecipeJsonSchema,
   validateTrainRecipe,
   type TrainRecipeValidation,
 } from './train-recipe.js';

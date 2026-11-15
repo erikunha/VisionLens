@@ -166,6 +166,19 @@ export function trainRecipeFingerprint(
 }
 
 /**
+ * The JSON Schema of the recipe.
+ *
+ * The schema is generated from the Zod schema above, so the committed file
+ * and the schema the TypeScript side validates with can never drift, and
+ * the Python side reads the generated file to judge the recipe it
+ * publishes. It is the same mechanism the manifest of the adapter uses
+ * (`packages/core/src/adapter/embedding-manifest.ts`).
+ */
+export function trainRecipeJsonSchema(): unknown {
+  return z.toJSONSchema(TrainRecipeSchema, { io: 'output' });
+}
+
+/**
  * The identity of the ontology the labels live in, recomputed.
  *
  * The ontology of a probe is its CLASS SPACE: the set of label keys the
