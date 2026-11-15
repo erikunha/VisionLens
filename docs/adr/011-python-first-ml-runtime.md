@@ -395,7 +395,7 @@ ADR-006 stays byte-unchanged; this ADR supersedes part of it by addition
 
 | Surface | Rule | Today |
 |---|---|---|
-| CLI bins | `vision-lens` stays canonical, `ai-image-labeling` stays as an alias with a sunset policy (`docs/vnext/02-ARCHITECTURE-DECISION.md:30`) | both bins unchanged (`packages/cli/package.json:10-11`); no sunset date set yet |
+| CLI bins | `vision-lens` is the only bin (`docs/vnext/02-ARCHITECTURE-DECISION.md:30`) | one bin (`packages/cli/package.json:9-11`); the alias of the earlier name is gone, and the CLI package was never published |
 | npm SDK | root exports are kept until a versioned migration; a lightweight client is a new entrypoint, never a silent replacement (`docs/vnext/02-ARCHITECTURE-DECISION.md:31`) | exports still `.` and `./cli` (`packages/sdk/package.json:7-9`); `./client` not yet added |
 | Contracts | no breaking change without a major bump (`packages/contracts/src/version-guard.ts:248`) | `1.0.0` (`packages/contracts/src/version.ts:9`) |
 | Store | forward-only migrations, SQLite store preserved, not replaced (`docs/vnext/08-DOMAIN-STORE-AND-PROVENANCE.md:5`) | `packages/core/src/store/migrations/` |

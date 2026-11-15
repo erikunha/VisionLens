@@ -28,7 +28,7 @@ and Python ML services, glued by versioned contracts:
 apps/studio          Next.js (spec 010)
 apps/api             Fastify HTTP API (spec 009)
 packages/core        existing pipeline + data/al/release domain (from src/)
-packages/cli         `vision-lens` + `ai-image-labeling` compat bin (spec 001)
+packages/cli         `vision-lens` bin (spec 001)
 packages/sdk         stable re-export surface (from src/sdk.ts)
 packages/contracts   Zod schemas, JSON Schemas, OpenAPI — single truth (spec 002)
 packages/mcp         MCP server (spec 011)

@@ -1,7 +1,6 @@
 # Vision Lens — the vision evolution
 
-> Product name: **Vision Lens** (repo `erikunha/VisionLens`, formerly `LAIbemage` / the
-> `ai-image-labeling` CLI). Status: Active · Date: 2026-11-10 · Decisions: ADR-005…010 ·
+> Product name: **Vision Lens** (repo `erikunha/VisionLens`). Status: Active · Date: 2026-11-10 · Decisions: ADR-005…010 ·
 > Plan: `specs/001–014` (local, untracked per ADR-010) · Progress mirror: `ROADMAP.md`
 
 ## What Vision Lens is becoming
@@ -39,7 +38,7 @@ Surfaces and the single contract spine:
 ```mermaid
 flowchart TB
   subgraph surfaces["Equivalent surfaces (constitution III)"]
-    CLI["vision-lens CLI<br/>(+ ai-image-labeling compat)"]
+    CLI["vision-lens CLI"]
     STUDIO["Studio (Next.js)<br/>visual design via uxpilot prototype"]
     API["HTTP API (Fastify)<br/>OpenAPI from contracts"]
     MCP["MCP server (stdio)<br/>12 tiered tools"]

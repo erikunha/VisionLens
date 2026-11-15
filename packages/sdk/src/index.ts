@@ -1,5 +1,5 @@
 /**
- * Stable public library API for Vision Lens (formerly the legacy `ai-image-labeling` package).
+ * Stable public library API for Vision Lens (evolved from the legacy single-package SDK).
  * All exports from this file are semver-stable.
  * Deep @vision-lens/core module paths are NOT stable — use this entry point.
  */

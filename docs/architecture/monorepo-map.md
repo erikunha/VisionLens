@@ -8,7 +8,7 @@ Workspace layout after spec 001 (foundation monorepo): what lives where, which s
 vision-lens/                # pnpm + turbo monorepo root (private tooling shell)
 ├── packages/                 # TypeScript packages (NodeNext ESM, .js import suffixes)
 │   ├── core/                 # @vision-lens/core — pipeline, providers, domain services (spec 001)
-│   ├── cli/                  # @vision-lens/cli — vision-lens + ai-image-labeling bins (spec 001)
+│   ├── cli/                  # @vision-lens/cli: the vision-lens bin (spec 001)
 │   ├── sdk/                  # @vision-lens/sdk — public re-export surface (spec 001)
 │   └── contracts/            # @vision-lens/contracts — versioned zod schemas (specs 001-002)
 ├── apps/                     # user-facing applications (TypeScript)
@@ -32,7 +32,7 @@ flowchart TD
 
     subgraph PKGS["packages/ — TypeScript"]
         CORE["@vision-lens/core<br/>pipeline, providers, domain services<br/>spec 001"]
-        CLI["@vision-lens/cli<br/>vision-lens + ai-image-labeling bins<br/>spec 001"]
+        CLI["@vision-lens/cli<br/>vision-lens bin<br/>spec 001"]
         SDK["@vision-lens/sdk<br/>public re-export surface<br/>spec 001"]
         CONTRACTS["@vision-lens/contracts<br/>versioned zod schemas<br/>specs 001-002"]
     end

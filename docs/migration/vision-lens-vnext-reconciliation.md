@@ -6,7 +6,7 @@
 | Date     | 2026-11-11               |
 | Deciders | @erikunha                |
 | Ticket   | VLN-001, phase R0, role architecture |
-| Repository | `erikunha/LAIbemage`, branch `feat/visual-lens`, commit `6c3d95f` |
+| Repository | `erikunha/VisionLens`, branch `feat/visual-lens`, commit `6c3d95f` |
 | This report | branch `feat/vnext-reconciliation`, commit `ed327ff` |
 | Design baseline | `VisionLens_2027_Canonical_Spec` (2026-11-11), integrated at `docs/vnext/` |
 
@@ -159,7 +159,7 @@ two disagree in a way only the maintainer can settle.
 | Operation registry | DEFER | absent | The baseline proposes 8 operation codes; the repository has none. ADR-016 would build it on the existing `AGENT_TOOL_TIERS` enum rather than a second tier vocabulary. |
 | Agent permission tiers | CONFLICT | `packages/contracts/src/enums.ts` (`AGENT_TOOL_TIERS`), `docs/adr/009-agent-safety-tiers.md` | The repository implements 5 tiers (`read`, `analyze`, `propose`, `gated-execute`, `approval-required`). The baseline's tables introduce `bounded compute` and `privileged approval`. One vocabulary has to win. |
 | Approvals | AMEND | `packages/contracts/src/entities/agent-run.ts` (`ApprovalSchema`) | ADR-009 requires a tool to return a pending approval request and to execute only after an explicit token. The schema can record only a finished decision, with no token, no TTL and no scope. ADR-018 asks for TTL and scope; making them required is a breaking change that forces a major `CONTRACTS_VERSION` bump. |
-| CLI | KEEP | `packages/cli/src/index.ts`, `packages/cli/src/help.ts` | The `vision-lens` bin is canonical and the `ai-image-labeling` compatibility alias exists, exactly as the baseline's compatibility rule 1 requires. The baseline adds `--json` envelopes, `--dry-run` and a `doctor` subcommand; those are additive. |
+| CLI | KEEP | `packages/cli/src/index.ts`, `packages/cli/src/help.ts` | The `vision-lens` bin is canonical. The baseline's compatibility rule 1 asks for an alias of the earlier bin; the alias lived inside the unpublished CLI package and was removed afterwards, because no published consumer depended on it. The baseline adds `--json` envelopes, `--dry-run` and a `doctor` subcommand; those are additive. |
 | npm SDK | AMEND | `packages/sdk/package.json` (`exports`: `.`, `./cli`), `packages/sdk/src/index.ts` | The baseline wants a lightweight `@vision-lens/sdk/client` and a deprecated `/legacy`, while the root keeps its exports until a versioned migration. The root currently re-exports the cloud storage adapters, so a browser bundle would drag in the AWS, Azure and GCP SDKs. |
 | Core providers and Sharp pipeline | KEEP | `packages/core/src/analyzer/providers/`, `packages/core/src/processor/` | The baseline says explicitly that there is no big-bang port: the current TypeScript providers and the Sharp pipeline stay until contract parity and profiling justify moving them. |
 | Legacy analysis flow | KEEP | `packages/core/src/index.ts`, `packages/cli/src/commands/import-run.ts` | The baseline keeps `vision-lens import-run` for the legacy `analysis_results.json`. The command exists. |
@@ -190,8 +190,8 @@ the delta that could break a user.
 
 | Surface | Today | Proposed | Delta that could break a user | Handling |
 | --- | --- | --- | --- | --- |
-| CLI flags | 49 flags in `packages/cli/src/help.ts`, including `--dry-run`, `--estimate`, `--webhook`, `--session-gap` | keep, add `--json`, `doctor` | none if additive; a renamed flag breaks a script | Add only. No flag is renamed or removed. The compatibility bin keeps its alias. |
-| CLI bins | `vision-lens` (canonical) and `ai-image-labeling` (alias) | unchanged | none | Keep both. The alias gets a sunset policy, not a removal. |
+| CLI flags | 49 flags in `packages/cli/src/help.ts`, including `--dry-run`, `--estimate`, `--webhook`, `--session-gap` | keep, add `--json`, `doctor` | none if additive; a renamed flag breaks a script | Add only. No flag is renamed or removed. |
+| CLI bins | `vision-lens` (canonical) and the alias of the earlier bin name | the alias is removed | none for a published consumer: the CLI package was never published | The canonical bin stays. The alias is gone, because a bin nobody installs is a bin nobody keeps. |
 | SDK exports | `@vision-lens/sdk` exports `.` and `./cli`; the root re-exports the cloud adapters | add `./client` (lightweight HTTP) and `./legacy` (deprecated in-process) | a consumer that imports the root keeps working; a browser consumer that imports the root today already pulls the cloud SDKs | Add the entrypoints. The root keeps its exports until a major version. Nothing is replaced silently. |
 | SDK package identity | `@vision-lens/sdk`, not published | publishable, name verified against the registry first | a name collision would block publishing | Verify the registry before claiming availability. Nothing published from this repository yet. |
 | Contracts | `CONTRACTS_VERSION` 1.0.0, 14 entities, 8 enums | add a job entity and a job lifecycle | adding a required field to an existing entity is breaking and forces a major bump | The guard already refuses a breaking change without a bump. New fields start optional. |

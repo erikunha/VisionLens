@@ -11,7 +11,7 @@ versioning adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Monorepo foundation (spec 001, `feat/visual-lens`): pnpm workspaces + Turborepo —
   `packages/{core,cli,sdk,contracts}`, `apps/{api,studio}` placeholders, `services/{vision,training,agents}`
   Python skeletons; the vitest suite and root configs now run from the workspace root.
-- `vision-lens` canonical bin in `@vision-lens/cli`, with the deprecated `ai-image-labeling` compat bin.
+- `vision-lens` canonical bin in `@vision-lens/cli`.
 - `@vision-lens/sdk` `./cli` programmatic entry (re-export of the CLI Commander program; importing it
   executes the CLI — same semantics as the pre-migration `./cli` export).
 - ESLint boundary enforcement: LLM provider SDKs are rejected outside
@@ -26,10 +26,9 @@ versioning adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
   `@vision-lens`, across all six packages (`cli`, `contracts`, `core`, `sdk`,
   `api-placeholder`, `studio-placeholder`).
 - The canonical CLI bin is now `vision-lens`; the previous short-form bin is removed (it was never published).
-- The environment variable prefix is now `VISION_LENS_` (`VISION_LENS_NO_DEPRECATION`,
-  `VISION_LENS_DATASETS_DIR`, `VISION_LENS_BENCHMARK_MODEL`).
+- The environment variable prefix is now `VISION_LENS_` (`VISION_LENS_DATASETS_DIR`,
+  `VISION_LENS_BENCHMARK_MODEL`).
 - The store home is now `VISION_LENS_HOME`, defaulting to `~/.vision-lens/store.db`.
-- The deprecated `ai-image-labeling` compat bin now points at `vision-lens`.
 - The applied migration files (`0001_init.sql`, `0002_legacy_import.sql`) are deliberately
   **unchanged** by the rename: the runner hashes their raw bytes into the store's migration
   ledger, so even a comment-only edit would make every store created before it unopenable. Their
@@ -40,16 +39,11 @@ versioning adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 - Help-parity bin tests and CLI test scripts received explicit timeouts (no more 5 s default flakes
   in coverage mode).
 
-### Deprecated
-
-- The legacy `ai-image-labeling` bin: kept **inside the (unpublished) CLI package** as a
-  compatibility alias that points at `vision-lens`, printing one stderr deprecation line per run
-  (suppress with `VISION_LENS_NO_DEPRECATION=1`). The package was never published to npm, so the
-  alias only affects source installs and local checkouts — there is no published deprecation window
-  to count down.
-
 ### Removed
 
+- The legacy compatibility bin of the earlier CLI name, with its deprecation warning and its
+  `VISION_LENS_NO_DEPRECATION` escape hatch. The CLI package was never published to npm, so no
+  published consumer is affected; the canonical `vision-lens` bin is unchanged.
 - Root-level `tests/` tree (migrated into `packages/*/tests/` and `apps/*/tests/`).
 - Dead `pnpm.onlyBuiltDependencies` block from the root `package.json` (native build approvals live
   in `pnpm-workspace.yaml` `allowBuilds`).
