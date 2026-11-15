@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TRAIN_RECIPE_SCHEMA_VERSION,
+  ontologyVersionOf,
   trainRecipeFingerprint,
   validateTrainRecipe,
 } from '../../src/training/index.js';
@@ -155,5 +156,24 @@ describe('the recipe of a training run', () => {
     const changed = trainRecipeFingerprint({ ...recipe, seed: 43 });
 
     expect(changed).not.toBe(trainRecipeFingerprint(recipe));
+  });
+
+  it('computes the ontology version over the class space', () => {
+    const version = ontologyVersionOf(['defect:candle', 'normal']);
+
+    expect(version).toMatch(/^fp2:[0-9a-f]{16}$/);
+    // The digest covers the class space and not the order of its keys.
+    expect(ontologyVersionOf(['normal', 'defect:candle'])).toBe(version);
+    // A class space that changed is another ontology.
+    expect(ontologyVersionOf(['normal'])).not.toBe(version);
+  });
+
+  it('reads the class space of a recipe from the keys of its class weights', () => {
+    const recipe = validRecipe();
+    const classWeights = recipe['classWeights'] as Record<string, unknown>;
+
+    expect(ontologyVersionOf(Object.keys(classWeights))).toBe(
+      ontologyVersionOf(['normal', 'defect:candle']),
+    );
   });
 });

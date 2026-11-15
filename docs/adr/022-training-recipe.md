@@ -136,7 +136,10 @@ of the tree recorded below.
    of the taxonomy prose: the prose is the concern of the prompt of the
    benchmark, the class space is the concern of the probe, and the two
    languages must not carry a copy of a paragraph of English to agree on an
-   address.
+   address. BOTH sides compute it over the same payload
+   (`ontology_version_of` in Python and `ontologyVersionOf` in TypeScript),
+   and the parity gate recomputes it from the class space the recipe
+   carries, so the version of a recipe is an address and not a label.
 7. The `train` extra lands with the ESTIMATOR and not with the recipe. The
    recipe needs nothing heavy: it reads two files and computes a digest, so
    the base install of the package stays free of scikit-learn and numpy

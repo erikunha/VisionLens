@@ -18,6 +18,7 @@ export {
   PartitionsSchema,
   TRAIN_RECIPE_SCHEMA_VERSION,
   TrainRecipeSchema,
+  ontologyVersionOf,
   trainRecipeFingerprint,
   validateTrainRecipe,
   type TrainRecipeValidation,

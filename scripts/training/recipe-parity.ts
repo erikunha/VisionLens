@@ -42,6 +42,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  ontologyVersionOf,
   trainRecipeFingerprint,
   validateTrainRecipe,
 } from '../../packages/core/src/training/index.js';
@@ -107,6 +108,29 @@ function checkRecipe(label: string, recipe: Record<string, unknown>): boolean {
     return false;
   }
   console.log(`ok: both sides compute the address ${declared} of the ${label} regime`);
+
+  // The ontology version is the digest of the class space, and the class
+  // space is the set of the keys of the class weights the recipe carries.
+  // The TypeScript side recomputes it, so a version nobody can recompute
+  // is caught here instead of being taken on trust.
+  const classWeights = recipe['classWeights'];
+  if (typeof classWeights !== 'object' || classWeights === null) {
+    console.error(`the recipe of the ${label} regime carries no class weights`);
+    return false;
+  }
+  const recomputedOntology = ontologyVersionOf(Object.keys(classWeights));
+  const declaredOntology = String(recipe['ontologyVersion']);
+  if (recomputedOntology !== declaredOntology) {
+    console.error(
+      `the two sides disagree about the ontology of the ${label} regime: the ` +
+        `Python side declared ${declaredOntology} and the TypeScript side computed ` +
+        `${recomputedOntology} over the class space of the recipe`,
+    );
+    return false;
+  }
+  console.log(
+    `ok: both sides compute the ontology ${declaredOntology} of the ${label} regime`,
+  );
   return true;
 }
 

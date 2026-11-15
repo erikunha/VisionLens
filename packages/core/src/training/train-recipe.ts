@@ -164,3 +164,25 @@ export function trainRecipeFingerprint(
     .digest('hex');
   return `fp2:${digest.slice(0, 16)}`;
 }
+
+/**
+ * The identity of the ontology the labels live in, recomputed.
+ *
+ * The ontology of a probe is its CLASS SPACE: the set of label keys the
+ * run may answer with, which are the keys of the class weights of the
+ * recipe. The digest covers the sorted keys, so a recipe whose class
+ * space changed has another fingerprint.
+ *
+ * The Python side computes the same digest over the same payload
+ * (`python/visionlens/src/visionlens/training/recipe.py`,
+ * `ontology_version_of`), so this side can tell whether the ontology
+ * version a recipe declares is the version of the class space the recipe
+ * carries. A version nobody can recompute is a label and not an address.
+ */
+export function ontologyVersionOf(labelKeys: readonly string[]): string {
+  const components = { labelKeys: [...new Set(labelKeys)].sort() };
+  const digest = createHash('sha256')
+    .update(canonicalJson(components), 'utf8')
+    .digest('hex');
+  return `fp2:${digest.slice(0, 16)}`;
+}
