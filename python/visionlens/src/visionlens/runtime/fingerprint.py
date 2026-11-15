@@ -64,7 +64,7 @@ def _serialize(value: Any) -> str:
     if isinstance(value, float):
         return _number(value)
     if isinstance(value, Mapping):
-        keys = sorted(value.keys(), key=_utf16_order)
+        keys = sorted(value.keys(), key=utf16_order)
         parts = []
         for key in keys:
             # Python has no `undefined`, so no key is dropped: a `None` is
@@ -76,11 +76,13 @@ def _serialize(value: Any) -> str:
     raise TypeError("the value of type " + type(value).__name__ + " has no canonical form")
 
 
-def _utf16_order(key: str) -> bytes:
-    """The sort key of an object key: its UTF-16 code units.
+def utf16_order(key: str) -> bytes:
+    """The sort key of a string, in the UTF-16 code units.
 
     The bytes are big-endian, so the comparison is the comparison of the
-    code units, the way the TypeScript sort orders them.
+    code units, the way the TypeScript sort orders them. A caller that has
+    to order strings the way the TypeScript side orders them uses this
+    key, so the two sides sort the same way.
     """
     return key.encode("utf-16-be", errors="surrogatepass")
 

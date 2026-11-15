@@ -122,6 +122,14 @@ of the tree recorded below.
      claims one configuration and hashes another is a record nobody can
      reproduce, and the read-back path recomputes the digest instead of
      keeping the address it was handed.
+   - the recipe refuses a SPLIT that names a snapshot it does not have. The
+     fingerprint of the partition is recomputed from the assignments the
+     recipe reads, over the same pairs the TypeScript side digests, so a
+     split whose declared fingerprint does not describe its own items is a
+     split whose snapshot is a name. The HASH OF THE MANIFEST is carried
+     verbatim instead: it covers the bookkeeping of the manifest (the seed,
+     the ratios, the notes), which the recipe does not hold, and the
+     manifest owns its own hash.
    - the recipe refuses a DEVICE the record does not support. The CPU is
      the reference device and a silent fallback is forbidden
      (`docs/vnext/adrs/ADR-017-local-first-hardware.md:9`).

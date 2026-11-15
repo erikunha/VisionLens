@@ -38,6 +38,7 @@ the address of a configuration or the promise means nothing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Sequence, Tuple
@@ -46,7 +47,7 @@ from ..protocol import CONTRACT_VERSION
 from ..registry.loader import ModelRegistryError, ModelNotFoundError, resolve_model
 from ..registry.loader import load_model_registry
 from ..registry.record import ModelRecord, ModelRecordError
-from ..runtime.fingerprint import fingerprint_v2
+from ..runtime.fingerprint import canonical_json, fingerprint_v2, utf16_order
 
 #: The version of the shape of the recipe itself.
 RECIPE_VERSION = "1.0.0"
@@ -307,6 +308,24 @@ def ontology_version_of(label_keys: Sequence[str]) -> str:
     whose class space changed has another fingerprint.
     """
     return fingerprint_v2({"labelKeys": sorted(set(label_keys))})
+
+
+def partition_fingerprint_of(assignments: Sequence[Mapping[str, Any]]) -> str:
+    """The fingerprint of the partition of a split, recomputed.
+
+    The fingerprint is the sha256 over the canonical JSON of the sorted
+    `id -> split` pairs, and it is the address of the partition alone: which
+    item sits in which split.
+
+    The TypeScript side computes the same digest over the same pairs
+    (`packages/core/src/benchmark/splits.ts`, `computePartitionFingerprint`),
+    and the recipe recomputes it because it holds the ids the split claims:
+    a split whose declared fingerprint does not describe its own assignments
+    is a split that names a snapshot it does not have.
+    """
+    pairs = [[str(item["id"]), str(item["split"])] for item in assignments]
+    pairs.sort(key=lambda pair: utf16_order(pair[0]))
+    return hashlib.sha256(canonical_json(pairs).encode("utf-8")).hexdigest()
 
 
 def _require(condition: bool, code: str, field_path: str, reason: str) -> None:
@@ -631,6 +650,21 @@ def resolve_recipe(
             f"dataset.{name}",
             "the split carries no value for this field, and a recipe may not invent one",
         )
+
+    # The snapshot the recipe pins is the partition the split holds, and the
+    # recipe holds the ids of that partition, so the recipe recomputes the
+    # fingerprint of the partition instead of taking the declared one on
+    # trust: a split that names a snapshot it does not have is a split whose
+    # snapshot is a name.
+    recomputed_snapshot = partition_fingerprint_of(split["assignments"])
+    _require(
+        dataset.snapshot_fingerprint == recomputed_snapshot,
+        "RECIPE_SNAPSHOT_MISMATCH",
+        "dataset.snapshotFingerprint",
+        f"the split declares the fingerprint {dataset.snapshot_fingerprint} and its own "
+        f"assignments digest to {recomputed_snapshot}; a split that names a snapshot it "
+        "does not have is a split whose snapshot is a name",
+    )
 
     recipe = TrainRecipe(
         encoder=encoder,

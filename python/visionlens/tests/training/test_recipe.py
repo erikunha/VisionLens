@@ -27,6 +27,7 @@ from visionlens.training.recipe import (
     default_class_weights,
     label_key_of,
     ontology_version_of,
+    partition_fingerprint_of,
     recipe_fingerprint,
     recipe_from_record,
     resolve_recipe,
@@ -311,6 +312,40 @@ def test_a_partition_with_no_item_is_refused(tmp_path: Path) -> None:
 
     assert failure.value.code == "RECIPE_SPLIT_INVALID"
     assert failure.value.field == "partitions.test"
+
+
+def test_a_split_that_names_a_snapshot_it_does_not_have_is_refused(
+    tmp_path: Path,
+) -> None:
+    """The fingerprint of the partition is recomputed, not taken on trust.
+
+    The recipe holds the ids of the partition, so it can tell whether the
+    snapshot the split names is the snapshot the split holds.
+    """
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+    tampered = copy.deepcopy(split)
+    moved = next(a for a in tampered["assignments"] if a["split"] == "val")
+    moved["split"] = "train"
+    target = tmp_path / "tampered.json"
+    target.write_text(json.dumps(tampered), encoding="utf-8")
+
+    with pytest.raises(RecipeError) as failure:
+        resolve_tracked(split_path=str(target))
+
+    assert failure.value.code == "RECIPE_SNAPSHOT_MISMATCH"
+    assert failure.value.field == "dataset.snapshotFingerprint"
+
+
+def test_the_snapshot_fingerprint_of_the_recipe_is_the_digest_of_the_partition() -> None:
+    """The recipe pins the partition the split holds, not the name of it."""
+    split = json.loads(TRACKED_SPLIT.read_text(encoding="utf-8"))
+
+    recipe = resolve_tracked()
+
+    assert recipe.dataset.snapshot_fingerprint == partition_fingerprint_of(
+        split["assignments"]
+    )
+    assert recipe.dataset.snapshot_fingerprint == split["partitionFingerprint"]
 
 
 def test_a_split_without_the_fingerprint_of_its_snapshot_is_refused(
