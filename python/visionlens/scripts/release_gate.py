@@ -66,7 +66,12 @@ HEAVY_MODULES = (
     "langgraph",
     "fastapi",
     "uvicorn",
-    "scikit-learn",
+    # The IMPORT NAMES of the heavy stacks, and not the names of the
+    # distributions: a module is a key of sys.modules, and "scikit-learn" is
+    # the name of a distribution and never the name of a module.
+    "sklearn",
+    "numpy",
+    "joblib",
 )
 
 # Artifact scan: filename rules. Checkpoints, datasets, images and credential
