@@ -280,8 +280,8 @@ and 15 first, then 10 and 13, then 12, and 11 and 16 stay controlled research la
 | 11 | ALPR and OCR | P3, research | UFPR-ALPR, academic and non commercial, no redistribution | exact plate match, CER, end-to-end recall |
 | 12 | Video counting | P2 | a clip with authorization, MOT17 only after the terms review | count MAE, event P/R, HOTA and IDF1 |
 | 13 | PPE | P2, research | SHWD as a candidate, the rights of every image to review | critical recall, false alert rate, abstention |
-| 14 | Visual similarity | P0 | Oxford Pets with annotated relevance pairs | Recall@k, mAP@k, nDCG, p95 |
-| 15 | Background removal | P1 | P3M-10k (MIT), DIS5K non commercial and no redistribution | mIoU, boundary F1, SAD, latency |
+| 14 | Visual similarity | P0 | Oxford Pets as a candidate, with annotated relevance pairs | Recall@k, mAP@k, nDCG, p95 |
+| 15 | Background removal | P1 | P3M-10k as a candidate, MIT with portrait rights caution, DIS5K non commercial and no redistribution | mIoU, boundary F1, SAD, latency |
 | 16 | Chest X-ray | P4, research only | CheXpert and VinDr-CXR under a research agreement | AUROC and AUPRC per pathology, ECE, shift |
 
 **Lab 09 is where PyTorch enters the training path.** The M0 rung of the canonical ladder is a
@@ -323,7 +323,7 @@ and that this repository still has to build:
 | Owned foundation models | Adapt, evaluate and operate existing ones (constitution governance) |
 | Multi-user / SaaS / RBAC | Single-user local-first; revisit with validated demand (vision monetization hypotheses) |
 | Distributed/multi-GPU training | One MPS device; CUDA only via optional adapters (ADR-007) |
-| Medical imaging vertical | Validation/regulatory burden out of scope for now; the chest X-ray lab of the Phase II extension is research only and never a clinical claim |
+| Medical imaging vertical | Validation/regulatory burden out of scope for now; the chest X-ray tickets of the Phase II extension stay rejected until a dated amendment of this row, and no lab of this repository is ever a clinical claim |
 | Local planning material in git | Planning stays local (ADR-020); ADRs + this roadmap are the tracked record |
 | Live video, continuous camera and public stream | The first release of the video lab is an offline clip with a retention policy; no camera, no stream |
 | Identification of people across clips | Counting is ephemeral and clip scoped; no biometrics, no persistent identity, no cross-video linkage |
