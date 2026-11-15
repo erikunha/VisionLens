@@ -106,8 +106,12 @@ export class FacadeError extends Error {
 
 /**
  * Whether a code belongs to the facade, as opposed to the wire.
+ *
+ * The argument is a plain string, because a code that arrives from the wire
+ * is a string and not a member of the union, and the check must be safe
+ * against a name the prototype chain carries.
  */
-export function isFacadeOwnCode(code: FacadeErrorCode): code is FacadeOwnErrorCode {
+export function isFacadeOwnCode(code: string): code is FacadeOwnErrorCode {
   return Object.hasOwn(OWN_CODES, code);
 }
 

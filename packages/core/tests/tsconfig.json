@@ -25,6 +25,7 @@
     "./store/helpers.ts",
     "./benchmark/**/*.test.ts",
     "./config/**/*.test.ts",
+    "./facade/**/*.test.ts",
     "./meta/**/*.test.ts"
   ]
 }

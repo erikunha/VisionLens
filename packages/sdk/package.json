@@ -13,8 +13,8 @@
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "typecheck": "tsc --project tsconfig.json --noEmit",
-    "lint": "eslint src"
+    "typecheck": "tsc --project tsconfig.json --noEmit && tsc --project tests/tsconfig.json --noEmit",
+    "lint": "eslint src tests"
   },
   "dependencies": {
     "@vision-lens/cli": "workspace:*",
