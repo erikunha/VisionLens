@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/visionlens/capability-pack.v0.schema.json",
+  "title": "CapabilityPack proposal (not production contract)",
+  "description": "Illustrative schema ONLY; compare with canonical Zod and accept an ADR before integration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposalVersion",
+    "packId",
+    "taskKind",
+    "inputKinds",
+    "outputKinds",
+    "evaluatorId",
+    "licenseGate",
+    "safetyTier"
+  ],
+  "properties": {
+    "proposalVersion": {
+      "type": "string",
+      "const": "cvpack.proposed.v0"
+    },
+    "packId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,80}$"
+    },
+    "taskKind": {
+      "type": "string",
+      "enum": [
+        "image.classification",
+        "image.detection",
+        "image.ocr",
+        "video.counting",
+        "image.ppe",
+        "image.retrieval",
+        "image.matting",
+        "research.xray"
+      ]
+    },
+    "inputKinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "outputKinds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "evaluatorId": {
+      "type": "string",
+      "minLength": 3
+    },
+    "licenseGate": {
+      "type": "string",
+      "enum": [
+        "ALLOW_AFTER_REVIEW",
+        "RESEARCH_ONLY",
+        "BLOCKED_UNKNOWN"
+      ]
+    },
+    "safetyTier": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "personal-data",
+        "safety-sensitive",
+        "restricted-medical"
+      ]
+    },
+    "requiresExtras": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true
+    },
+    "deviceCandidates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "cpu",
+          "mps",
+          "cuda"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "notes": {
+      "type": "string"
+    }
+  }
+}

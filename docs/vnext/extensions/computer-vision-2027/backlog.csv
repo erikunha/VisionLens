@@ -1,0 +1,34 @@
+id,title,workstream,priority,size_relative,depends_on,acceptance_evidence,release_gate,status
+VLCV-001,Inventory/reconcile Phase II against live tree,foundation,P0,S,VLN-001,"HEAD, dirty working tree, KEEP/AMEND/DEFER matrix",no local edits lost,PROPOSED
+VLCV-002,Model/dataset license policy and provenance,governance,P0,M,VLCV-001,license gate tests with conflicting DIS5K and research-only UFPR,unknown rights fail closed,PROPOSED
+VLCV-003,TaskSuite evaluator design and contract audit,foundation,P0,M,"VLCV-001,VLN-007,VLN-008",two task kinds and comparable suite fixture,no schema fork,PROPOSED
+VLCV-004,Oxford Pets multi-task dataset manifest and rights review,data,P0,M,"VLCV-002,VLCV-003","class/trimap/head ROI data card, split integrity",raw images not bundled,PROPOSED
+VLCV-005,Classification majority and frozen encoder baseline,lab09,P0,M,"VLCV-004,VLN-005",real macro F1 and per-class results on holdout,no test leakage,PROPOSED
+VLCV-006,PyTorch linear head and fine-tune option,lab09,P1,M,VLCV-005,training recipe checkpoint with run provenance,pretrained weights pinned,PROPOSED
+VLCV-007,"Calibration, abstention and error slices for Lab09",lab09,P1,M,VLCV-005,ECE/Brier risk-coverage error explorer,validation-only calibration,PROPOSED
+VLCV-008,pHash/SHA visual near-duplicate reference,lab14,P0,S,VLCV-004,unit tests against annotated duplicate pairs,no auto deletes,PROPOSED
+VLCV-009,SigLIP2 image/text embedding adapter,lab14,P0,M,"VLCV-004,VLN-005",encoder fingerprint and CPU benchmark,optional dependency,PROPOSED
+VLCV-010,Exact cosine search + retrieval benchmark,lab14,P0,M,"VLCV-008,VLCV-009",Recall@k against relevance labels,score not confidence,PROPOSED
+VLCV-011,Binary foreground segmentation baseline,lab15,P1,M,"VLCV-004,VLCV-003",mask geometry tests and mIoU,trimap not alpha matte,PROPOSED
+VLCV-012,Background matting and RGBA export,lab15,P1,M,VLCV-011,SAD/IoU by ground truth type; RGBA fidelity,no original overwrite,PROPOSED
+VLCV-013,Studio multitask evidence gallery/arena slice,studio,P1,M,"VLCV-005,VLCV-010,VLCV-011,VLN-011",3 task overlays with source refs and a11y,same common workflow,PROPOSED
+VLCV-014,COCO-like real-bbox import/export audit,lab10,P1,M,"VLCV-002,VLCV-003",geometry round-trip with orientation tests,no full-image dummy boxes,PROPOSED
+VLCV-015,RT-DETR CPU detector adapter,lab10,P1,M,VLCV-014,real detection inference and AP on verified subset,pin checkpoints,PROPOSED
+VLCV-016,Ultralytics YOLO detector with license gate,lab10,P2,M,"VLCV-014,VLCV-002",adapter parity and AGPL/enterprise decision,no implicit proprietary distribution,PROPOSED
+VLCV-017,COCO detection eval and slice scorecard,lab10,P1,M,"VLCV-014,VLCV-015",AP50:95 per-class small and large,same GT and thresholds,PROPOSED
+VLCV-018,Detection model arena compare and rollbacks,lab10,P2,S,"VLCV-017,VLCV-016",run comparability checked and fallbacks logged,unavailable is not made up,PROPOSED
+VLCV-019,PPE taxonomy and ternary label guidelines,lab13,P2,S,"VLCV-014,VLCV-002",present absent unknown ontology with reviewer guide,no compliance claims,PROPOSED
+VLCV-020,PPE per-person association / human review,lab13,P2,M,"VLCV-019,VLCV-017",occlusion false alert and critical recall scorecard,human validation,PROPOSED
+VLCV-021,Offline video frame/timestamp ingest,lab12,P2,M,"VLCV-014,VLCV-002",deterministic frame timestamps and sampling records,no streaming default,PROPOSED
+VLCV-022,Tracking adapter with ephemeral IDs,lab12,P2,M,"VLCV-021,VLCV-015","ByteTrack stable clip-scoped IDs, no cross camera",privacy safe,PROPOSED
+VLCV-023,Directional crossing event engine,lab12,P2,M,VLCV-022,crossing fixtures re-entry and rewind deterministic,no double count,PROPOSED
+VLCV-024,Video count eval and HOTA/IDF1,lab12,P2,M,VLCV-023,MAE event P/R and HOTA if GT,consented footage,PROPOSED
+VLCV-025,Synthetic plate generator with policy,lab11,P3,S,"VLCV-002,VLCV-014",license-safe synthetic fixtures no real plate data,redact output,PROPOSED
+VLCV-026,Detector-crop-OCR rectification pipeline,lab11,P3,M,"VLCV-025,VLCV-015",region OCR evidence and reject cases,no live surveillance,PROPOSED
+VLCV-027,ALPR exact/CER evaluator and privacy tests,lab11,P3,M,VLCV-026,exact match CER and missed detector counted,research only,PROPOSED
+VLCV-028,Chest X-ray restricted research governance,lab16,P4,M,VLCV-002,"data access, DUA, security ADR and patient split plan",no clinical claims,PROPOSED
+VLCV-029,X-ray research multilabel evaluation only,lab16,P4,L,"VLCV-028,VLCV-003","patient heldout AUROC/AUPRC, uncertainty policy",restricted environment,PROPOSED
+VLCV-030,Grounding DINO text-to-box spike,frontier,P3,M,VLCV-017,novel class recall vs supervised baseline,license and GPU measured,PROPOSED
+VLCV-031,SAM2 prompt-to-video mask evaluation,frontier,P3,L,"VLCV-021,VLCV-011",mask propagation IoU temporal metric,no guaranteed MPS,PROPOSED
+VLCV-032,Document OCR + provenance citation spike,frontier,P3,M,VLCV-026,field-level score and region evidence,no OCR prompt commands,PROPOSED
+VLCV-033,Synthetic/anomaly/edge research hypotheses,frontier,P4,L,VLCV-003,real holdout delta or STOP decision,no fake benchmark,PROPOSED

@@ -26,7 +26,7 @@ A visitor imports a small licensed visual dataset, audits it, computes visual em
 
 | Area | Files |
 |---|---|
-| Adoption & observed state | `00`, `01`, `02`, `26` |
+| Adoption & observed state | `00`, `01`, `02`, `26`, `AGENTS-HANDOFF.md` |
 | Product | `03`, `22`, `24` |
 | Architecture | `04`, `05`, `06`, `07`, `08`, `09` |
 | Data & ML | `10`, `11`, `12`, `13`, `14`, `15`, `16` |

@@ -1,0 +1,23 @@
+{
+  "proposalVersion": "cvpack.proposed.v0",
+  "packId": "visual-similarity-lab",
+  "taskKind": "image.retrieval",
+  "inputKinds": [
+    "asset_ref",
+    "text_query"
+  ],
+  "outputKinds": [
+    "ranked_asset_refs"
+  ],
+  "evaluatorId": "retrieval.ranking.v0",
+  "licenseGate": "ALLOW_AFTER_REVIEW",
+  "safetyTier": "standard",
+  "requiresExtras": [
+    "vision"
+  ],
+  "deviceCandidates": [
+    "cpu",
+    "mps"
+  ],
+  "notes": "Metadata proposal, not deployed capability."
+}
