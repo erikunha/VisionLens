@@ -26,7 +26,9 @@ CAPABILITIES_SCHEMA_VERSION = 1
 
 # The modules each declared extra needs, by capability. The requirement
 # RANGES live in pyproject.toml; this map names what the environment is asked
-# about. The `all` extra is the union of the four capabilities.
+# about. The `all` extra is the union of the extras it installs, and not the
+# union of every capability: the aggregate installs the self references of
+# the distribution and nothing else.
 #
 # Every module named here is a module the extra INSTALLS: a map that named a
 # module the extra does not carry would report the extra as absent on a
