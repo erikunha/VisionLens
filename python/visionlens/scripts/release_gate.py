@@ -100,7 +100,11 @@ CONTENT_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
 ABSOLUTE_PATH_PATTERNS = (b"/" + b"Users" + b"/", b"/home/", b"/private/var/")
 
 IMPORT_CHECK = (
-    "import pathlib, sys, visionlens\n"
+    # The training surface is imported as well: the package does not import
+    # it at the top level, and a purity proof that cannot see a surface is a
+    # purity proof that proves nothing about it.
+    "import pathlib, sys, visionlens, visionlens.training\n"
+    "import visionlens.training.probe, visionlens.training.checkpoint\n"
     "assert visionlens.__version__ == '0.1.0', visionlens.__version__\n"
     "assert (pathlib.Path(visionlens.__file__).parent / 'py.typed').exists()\n"
     "heavy = [m for m in "
