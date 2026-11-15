@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { canonicalJson } from '@vision-lens/contracts';
+import { CONTRACTS_VERSION, canonicalJson, fingerprintV2 } from '@vision-lens/contracts';
 import { FacadeError } from './errors.js';
 
 /**
@@ -87,6 +87,31 @@ export interface FacadeArtifactReference {
   readonly sha256: string;
   /** The number of bytes of the vectors file. */
   readonly bytes: number;
+}
+
+/**
+ * The transform that produced the artifact.
+ *
+ * The transform is the encoder and the configuration it ran with: the model,
+ * the revision and the preprocessing. The run id, the timestamp, the device
+ * and the latency describe the RUN and not the transform, so they are not
+ * part of it.
+ */
+export interface FacadeArtifactTransform {
+  /** The id of the model that produced the vectors. */
+  readonly modelId: string;
+  /** The revision of the model. */
+  readonly revision: string;
+  /** The fingerprint of the preprocessing the run used. */
+  readonly preprocessingFingerprint: string;
+}
+
+/** A validated artifact: the reference of it and the transform behind it. */
+export interface FacadeValidatedArtifact {
+  /** The reference the facade publishes. */
+  readonly reference: FacadeArtifactReference;
+  /** The transform that produced the artifact. */
+  readonly transform: FacadeArtifactTransform;
 }
 
 /** What the worker claimed about the artifact it wrote. */
@@ -208,7 +233,7 @@ async function resolveArtifactDirectory(
  */
 export async function validateEmbeddingArtifact(
   claim: FacadeArtifactClaim,
-): Promise<FacadeArtifactReference> {
+): Promise<FacadeValidatedArtifact> {
   const relativePath = artifactRelativePath(claim.embeddingRunId);
   const directory = await resolveArtifactDirectory(claim.artifactRoot, relativePath);
 
@@ -277,11 +302,57 @@ export async function validateEmbeddingArtifact(
   }
 
   return {
-    kind: FACADE_ARTIFACT_KIND,
-    relativePath,
-    sha256: declared,
-    bytes: vectors.byteLength,
+    reference: {
+      kind: FACADE_ARTIFACT_KIND,
+      relativePath,
+      sha256: declared,
+      bytes: vectors.byteLength,
+    },
+    transform: {
+      modelId: requireString(manifest, 'modelId', relativePath),
+      revision: requireString(manifest, 'revision', relativePath),
+      preprocessingFingerprint: requireString(
+        manifest,
+        'preprocessingFingerprint',
+        relativePath,
+      ),
+    },
   };
+}
+
+/**
+ * The name of the transform that produced an artifact.
+ *
+ * The name says which encoder ran and at which revision, and it is stable:
+ * the audit walk reaches the encoder of an embedding through it.
+ */
+export function transformNameOf(transform: FacadeArtifactTransform): string {
+  return `vision.embed/${transform.modelId}@${transform.revision}`;
+}
+
+/**
+ * The fingerprint of the transform that produced an artifact.
+ *
+ * The fingerprint covers the encoder, the revision, the preprocessing and the
+ * snapshot the run belongs to, so two runs that differ in any of them have
+ * different fingerprints. The form is the one of the platform, `fp2:` and
+ * sixteen hex characters (`packages/contracts/src/fingerprint.ts:51`).
+ */
+export function transformFingerprintOf(
+  transform: FacadeArtifactTransform,
+  snapshotId: string,
+): string {
+  return fingerprintV2({
+    model: transform.modelId,
+    promptTemplate: 'embedding',
+    taxonomy: [],
+    preprocessing: {
+      revision: transform.revision,
+      fingerprint: transform.preprocessingFingerprint,
+    },
+    dataVersion: snapshotId,
+    contractsVersion: CONTRACTS_VERSION,
+  });
 }
 
 /** Reads the manifest of an artifact and refuses a shape that is not a JSON object. */
@@ -345,4 +416,20 @@ function requireMatchingNumber(
       `the artifact "${relativePath}" declares the ${field} ${String(value)} while the run declared ${expected}`,
     );
   }
+}
+
+/** Requires that a field of the manifest is a non-empty string. */
+function requireString(
+  manifest: Record<string, unknown>,
+  field: string,
+  relativePath: string,
+): string {
+  const value = manifest[field];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new FacadeError(
+      'ARTIFACT_INVALID',
+      `the manifest of "${relativePath}" carries no ${field}, and the transform of the run cannot be named without it`,
+    );
+  }
+  return value;
 }

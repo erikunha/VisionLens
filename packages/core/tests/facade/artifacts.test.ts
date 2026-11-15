@@ -76,11 +76,16 @@ describe('the artifact of the facade', () => {
       dtype: 'float32',
     });
 
-    expect(reference.kind).toBe('embedding');
-    expect(reference.relativePath).toBe('artifacts/embedding/run-fixture-0001');
-    expect(reference.relativePath.startsWith('/')).toBe(false);
-    expect(reference.sha256).toBe(FIXTURE_DIGEST);
-    expect(reference.bytes).toBe(2 * 3 * 4);
+    expect(reference.reference.kind).toBe('embedding');
+    expect(reference.reference.relativePath).toBe('artifacts/embedding/run-fixture-0001');
+    expect(reference.reference.relativePath.startsWith('/')).toBe(false);
+    expect(reference.reference.sha256).toBe(FIXTURE_DIGEST);
+    expect(reference.reference.bytes).toBe(2 * 3 * 4);
+    expect(reference.transform).toEqual({
+      modelId: 'siglip2-base',
+      revision: '75de2d55ec2d0b4efc50b3e9ad70dba96a7b2fa2',
+      preprocessingFingerprint: 'fp2:83adc4ef99979644',
+    });
   });
 
   it('refuses a digest the worker did not declare', async () => {
