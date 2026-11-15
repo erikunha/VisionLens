@@ -22,6 +22,7 @@
     "./search": "./dist/search/index.js",
     "./search/query": "./dist/search/query.js",
     "./store": "./dist/store/index.js",
+    "./training": "./dist/training/index.js",
     "./types": "./dist/types.js",
     "./utils/logger": "./dist/utils/logger.js"
   },

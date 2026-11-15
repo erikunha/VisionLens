@@ -1,0 +1,330 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "recipeVersion": {
+      "type": "string",
+      "const": "1.0.0"
+    },
+    "encoder": {
+      "type": "object",
+      "properties": {
+        "modelId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revision": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceUri": {
+          "type": "string",
+          "format": "uri"
+        },
+        "sourceDigest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1
+        },
+        "licenseUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "commercialUse": {
+          "type": "boolean"
+        },
+        "usageRestrictions": {
+          "type": "string"
+        },
+        "requiredExtras": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "tasks": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "preprocessingFingerprint": {
+          "type": "string",
+          "pattern": "^fp2:[0-9a-f]{16}$"
+        },
+        "deviceSupport": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "inputImageSize": {
+          "type": "object",
+          "properties": {
+            "width": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "height": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "additionalProperties": false
+        },
+        "featureExtractor": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outputShape": {
+          "type": "object",
+          "properties": {
+            "dimension": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "dimension"
+          ],
+          "additionalProperties": false
+        },
+        "latencyCostProfile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "calibrationStatus": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trustPolicy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attribution": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "modelId",
+        "revision",
+        "sourceUri",
+        "sourceDigest",
+        "license",
+        "licenseUrl",
+        "commercialUse",
+        "usageRestrictions",
+        "requiredExtras",
+        "tasks",
+        "preprocessingFingerprint",
+        "deviceSupport",
+        "inputImageSize",
+        "featureExtractor",
+        "outputShape",
+        "latencyCostProfile",
+        "calibrationStatus",
+        "trustPolicy",
+        "attribution"
+      ],
+      "additionalProperties": false,
+      "description": "The pinned encoder of a run."
+    },
+    "dataset": {
+      "type": "object",
+      "properties": {
+        "datasetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "splitId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "snapshotFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "manifestHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "datasetId",
+        "splitId",
+        "snapshotFingerprint",
+        "manifestHash"
+      ],
+      "additionalProperties": false,
+      "description": "The pinned data of a run."
+    },
+    "partitions": {
+      "type": "object",
+      "properties": {
+        "train": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "val": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "test": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "train",
+        "val",
+        "test"
+      ],
+      "additionalProperties": false,
+      "description": "The item ids of the three partitions of a run."
+    },
+    "ontologyVersion": {
+      "type": "string",
+      "pattern": "^fp2:[0-9a-f]{16}$"
+    },
+    "classWeights": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1
+      },
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string",
+            "const": "none"
+          },
+          {
+            "type": "number",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    "estimator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "optimizer": {
+      "type": "string",
+      "minLength": 1
+    },
+    "hyperparameters": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991
+    },
+    "devicePolicy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "augmentation": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "maxEpochs": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "earlyStopping": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "checkpointInterval": {
+      "type": "integer",
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991
+    },
+    "resources": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "budget": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {}
+    },
+    "contractsVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^fp2:[0-9a-f]{16}$"
+    }
+  },
+  "required": [
+    "recipeVersion",
+    "encoder",
+    "dataset",
+    "partitions",
+    "ontologyVersion",
+    "classWeights",
+    "estimator",
+    "optimizer",
+    "hyperparameters",
+    "seed",
+    "devicePolicy",
+    "augmentation",
+    "maxEpochs",
+    "earlyStopping",
+    "checkpointInterval",
+    "resources",
+    "budget",
+    "contractsVersion",
+    "fingerprint"
+  ],
+  "additionalProperties": false,
+  "description": "The pinned configuration of a training run."
+}

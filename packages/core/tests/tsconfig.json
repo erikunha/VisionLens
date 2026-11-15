@@ -26,6 +26,7 @@
     "./benchmark/**/*.test.ts",
     "./config/**/*.test.ts",
     "./facade/**/*.test.ts",
+    "./training/**/*.test.ts",
     "./meta/**/*.test.ts"
   ]
 }

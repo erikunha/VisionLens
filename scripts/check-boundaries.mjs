@@ -24,6 +24,11 @@
  *   - packages/core/src/facade/…/facade-clean.ts stdlib + contracts + the
  *     worker client
  *     → eslint MUST pass (exit 0)
+ *   - packages/core/src/training/…/training-violating.ts imports the store
+ *     → eslint MUST fail (exit 1): the path matches the training-scoped
+ *       boundary rule of the boundary-table row in AGENTS.md
+ *   - packages/core/src/training/…/training-clean.ts stdlib + contracts
+ *     → eslint MUST pass (exit 0)
  *
  * Why stdin and not a file: a planted violation is a violation. While it sat
  * in the tree, every other tool that walks the tree read it as source: the
@@ -116,6 +121,26 @@ const FACADE_CLEAN_PATH = path.join(
   'facade-clean.ts',
 );
 
+// Under packages/core/src/training/, at the SAME DEPTH as the real files of
+// the module: the rule matches the import specifier as it is written, and
+// a real training file reaches the store as '../store/...'.
+const TRAINING_VIOLATING_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'training',
+  'training-violating.ts',
+);
+const TRAINING_CLEAN_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'training',
+  'training-clean.ts',
+);
+
 const VIOLATING = `import OpenAI from 'openai';
 // Deliberate boundary violation fixture — must trip no-restricted-imports.
 export const client = OpenAI;
@@ -181,6 +206,20 @@ export const manifest = validateEmbeddingManifest;
  * noticing.
  */
 const FACADE_ALLOWED_ADAPTER_MODULES = ['embedding-manifest.js'];
+
+const TRAINING_VIOLATING = `import { DerivedArtifactsRepository } from '../store/repositories/derived-artifacts.js';
+// Deliberate training boundary violation fixture: the training surface
+// validates what the Python side published and commits the rows through a
+// sink, so it may not reach the store directly.
+export const artifacts = DerivedArtifactsRepository;
+`;
+
+const TRAINING_CLEAN = `import { createHash } from 'node:crypto';
+import { WORKER_PROTOCOL_ID } from '@vision-lens/contracts';
+// Clean training fixture: node stdlib plus contracts, must lint green.
+export const digest = createHash('sha256');
+export const protocol = WORKER_PROTOCOL_ID;
+`;
 
 /** The modules of the adapter that live in the tree right now. */
 function adapterModules() {
@@ -339,6 +378,34 @@ export const adapterModule = adapter;
     } else {
       console.log(`ok: the adapter module "${specifier}" is rejected inside facade/`);
     }
+  }
+
+  const trainingViolating = runEslint(TRAINING_VIOLATING, TRAINING_VIOLATING_PATH);
+  if (trainingViolating.status !== 1) {
+    failed = true;
+    console.error(
+      `FAIL: training violating fixture should exit 1 (direct store access inside training/), got ${trainingViolating.status}\n${trainingViolating.stdout}${trainingViolating.stderr}`,
+    );
+  } else if (
+    !trainingViolating.stdout.includes('no-restricted-imports') ||
+    !trainingViolating.stdout.includes('packages/core/src/training')
+  ) {
+    failed = true;
+    console.error(
+      `FAIL: violation reported, but not by the training boundary rule:\n${trainingViolating.stdout}`,
+    );
+  } else {
+    console.log('ok: direct store access inside training/ is rejected (no-restricted-imports)');
+  }
+
+  const trainingClean = runEslint(TRAINING_CLEAN, TRAINING_CLEAN_PATH);
+  if (trainingClean.status !== 0) {
+    failed = true;
+    console.error(
+      `FAIL: training clean fixture should exit 0, got ${trainingClean.status}\n${trainingClean.stdout}${trainingClean.stderr}`,
+    );
+  } else {
+    console.log('ok: training clean fixture (node stdlib + contracts) lints green');
   }
 } catch (error) {
   failed = true;

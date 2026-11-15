@@ -171,6 +171,26 @@ def test_a_big_integer_is_written_the_way_javascript_writes_it() -> None:
     assert fp2_of(payload) == "fp2:b9731da4f2f2d670"
 
 
+def test_an_integer_that_is_not_exactly_a_double_is_written_as_the_double() -> None:
+    # JavaScript holds every number as a double, so an integer above 2**53
+    # reaches the other side rounded, and the two sides of a fingerprint
+    # have to write the SAME text or the same content has two digests. The
+    # literals came from the live TypeScript canonicalJson and fingerprintV2,
+    # with the same payload.
+    payload = {
+        "above": 9007199254740993,
+        "boundary": 9007199254740992,
+        "wide": 12345678901234567890,
+        "safe": 9007199254740991,
+    }
+
+    assert canonical_json(payload) == (
+        '{"above":9007199254740992,"boundary":9007199254740992,'
+        '"safe":9007199254740991,"wide":12345678901234567000}'
+    )
+    assert fp2_of(payload) == "fp2:19bd3084365ea2c8"
+
+
 def test_object_key_order_does_not_change_the_digest() -> None:
     reordered = {key: FINGERPRINT_INPUT[key] for key in reversed(list(FINGERPRINT_INPUT))}
     assert digest_of(reordered) == digest_of(FINGERPRINT_INPUT)
