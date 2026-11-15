@@ -494,3 +494,25 @@ def test_a_checkpoint_that_carries_no_model_is_refused_by_the_checkpoint(
 
     assert failure.value.code == "CHECKPOINT_FILE_INVALID"
 
+
+def test_a_manifest_that_names_a_file_outside_the_run_is_refused(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint is a file of the directory of its manifest.
+
+    A manifest that names a path would make the reader hash a file the run
+    never published.
+    """
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    record = json.loads(manifest_path.read_text(encoding="utf-8"))
+    record["checkpointFile"] = "../outside.json"
+    manifest_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        read_checkpoint(manifest_path)
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
+

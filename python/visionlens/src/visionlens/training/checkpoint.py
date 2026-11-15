@@ -275,6 +275,33 @@ def _existing_manifest(manifest_path: Path) -> CheckpointManifest | None:
         return None
 
 
+def _checkpoint_file_of(manifest: CheckpointManifest) -> str:
+    """The name of the file of a checkpoint, checked.
+
+    A checkpoint is a file of the directory of its manifest, so the name is a
+    NAME and not a path: a manifest that names a file outside the directory
+    would make the reader hash a file the run never published, and the
+    directory of the run is the only place a checkpoint of the run can be.
+
+    @raises CheckpointError when the name is not a name.
+    """
+    name = manifest.checkpoint_file
+    if (
+        not name
+        or "/" in name
+        or "\\" in name
+        or name in (".", "..")
+        or Path(name).name != name
+    ):
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_INVALID",
+            "manifest.checkpointFile",
+            f"the manifest names the checkpoint '{name}' and a checkpoint is a file of the "
+            "directory of the manifest, never a path outside it",
+        )
+    return name
+
+
 def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
     """Reads a checkpoint back and refuses the ones that do not verify.
 
@@ -301,7 +328,7 @@ def read_checkpoint(manifest_path: Path) -> LoadedCheckpoint:
         ) from error
     manifest = CheckpointManifest.from_dict(record)
 
-    checkpoint_path = path.parent / manifest.checkpoint_file
+    checkpoint_path = path.parent / _checkpoint_file_of(manifest)
     if not checkpoint_path.is_file():
         raise CheckpointError(
             "CHECKPOINT_FILE_MISSING",
