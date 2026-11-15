@@ -251,6 +251,21 @@ def write_checkpoint(
         json.dumps(payload, sort_keys=True, indent=2, ensure_ascii=False) + "\n"
     ).encode("utf-8")
     digest = sha256_of_bytes(body)
+
+    # The conflict of the epoch is checked BEFORE the file is published: a
+    # refused publication leaves no artifact behind, and a run that cannot
+    # publish its epoch does not leave a file nobody points at.
+    manifest_path = target / MANIFEST_NAME_TEMPLATE.format(epoch=epoch)
+    existing = _existing_manifest(manifest_path)
+    if existing is not None and existing.checkpoint_sha256 != digest:
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_CONFLICT",
+            "manifest.epoch",
+            f"the epoch {epoch} was already published with the digest "
+            f"{existing.checkpoint_sha256} and this run publishes another digest with it; "
+            "two checkpoints of one epoch are two runs",
+        )
+
     checkpoint_path = target / (digest + CHECKPOINT_SUFFIX)
     _published(checkpoint_path, body)
 
@@ -265,16 +280,6 @@ def write_checkpoint(
         seed=model.seed,
         dimension=model.dimension,
     )
-    manifest_path = target / MANIFEST_NAME_TEMPLATE.format(epoch=epoch)
-    existing = _existing_manifest(manifest_path)
-    if existing is not None and existing.checkpoint_sha256 != digest:
-        raise CheckpointError(
-            "CHECKPOINT_MANIFEST_CONFLICT",
-            "manifest.epoch",
-            f"the epoch {epoch} was already published with the digest "
-            f"{existing.checkpoint_sha256} and this run publishes another digest with it; "
-            "two checkpoints of one epoch are two runs",
-        )
     _published(
         manifest_path,
         (
@@ -301,17 +306,35 @@ def _published(path: Path, payload: bytes) -> None:
 
 
 def _existing_manifest(manifest_path: Path) -> CheckpointManifest | None:
-    """The manifest already published at a path, if there is one."""
+    """The manifest already published at a path, if there is one.
+
+    A manifest that EXISTS and cannot be read is a manifest of the epoch, and
+    the epoch is not free: it is refused. A manifest nobody can read is a
+    manifest nobody may overwrite, because overwriting it would publish a
+    second run under the name of the first one.
+
+    @raises CheckpointError when the manifest exists and cannot be read.
+    """
     if not manifest_path.is_file():
         return None
     try:
         record = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    except (OSError, json.JSONDecodeError) as error:
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_CONFLICT",
+            "manifest.epoch",
+            f"the epoch already carries a manifest and the manifest cannot be read: {error}; "
+            "a manifest nobody can read is a manifest nobody may overwrite",
+        ) from error
     try:
         return CheckpointManifest.from_dict(record)
-    except CheckpointError:
-        return None
+    except CheckpointError as error:
+        raise CheckpointError(
+            "CHECKPOINT_MANIFEST_CONFLICT",
+            "manifest.epoch",
+            f"the epoch already carries a manifest and the manifest is not one: "
+            f"{error.reason}",
+        ) from error
 
 
 def _checkpoint_file_of(manifest: CheckpointManifest) -> str:

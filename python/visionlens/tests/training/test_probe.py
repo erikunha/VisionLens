@@ -679,3 +679,44 @@ def test_a_manifest_of_another_version_is_refused(tmp_path: Path) -> None:
         read_checkpoint(manifest_path)
 
     assert failure.value.code == "CHECKPOINT_MANIFEST_INVALID"
+
+
+
+
+def test_a_refused_publication_leaves_no_artifact_behind(tmp_path: Path) -> None:
+    """A run that cannot publish its epoch leaves the run directory as it
+    was."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    write_checkpoint(tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint)
+    before = sorted(path.name for path in tmp_path.iterdir())
+    other = replace(
+        model,
+        coefficients=tuple(tuple(value + 1.0 for value in row) for row in model.coefficients),
+    )
+
+    with pytest.raises(CheckpointError) as failure:
+        write_checkpoint(
+            tmp_path, other, epoch=1, recipe_fingerprint=recipe.fingerprint
+        )
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_CONFLICT"
+    assert sorted(path.name for path in tmp_path.iterdir()) == before
+
+
+
+
+def test_a_manifest_nobody_can_read_is_not_overwritten(tmp_path: Path) -> None:
+    """A manifest nobody can read is a manifest nobody may overwrite."""
+    recipe = tiny_recipe()
+    model = fit_probe_from_recipe(recipe, TINY_FEATURES, TINY_LABELS)
+    manifest_path = tmp_path / "checkpoint-000001.manifest.json"
+    manifest_path.write_text("{ not json", encoding="utf-8")
+
+    with pytest.raises(CheckpointError) as failure:
+        write_checkpoint(
+            tmp_path, model, epoch=1, recipe_fingerprint=recipe.fingerprint
+        )
+
+    assert failure.value.code == "CHECKPOINT_MANIFEST_CONFLICT"
+    assert manifest_path.read_text(encoding="utf-8") == "{ not json"
