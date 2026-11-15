@@ -24,6 +24,7 @@ from typing import Any, BinaryIO, Callable, Mapping, Sequence
 
 from . import protocol
 from .errors import ErrorCode, WorkerError
+from .inference.service import EmbedRuntime, runtime_from_environment
 from .operations import OPERATION_HANDLERS, OperationContext
 from .registry import ModelRegistry
 from .runtime.netguard import network_disabled
@@ -230,10 +231,12 @@ class Worker:
         wake_handler: Callable[[], None] | None = None,
         shutdown_event: threading.Event | None = None,
         network: str = NETWORK_DISABLED,
+        embed_runtime: EmbedRuntime | None = None,
     ) -> None:
         self._registry = registry if registry is not None else ModelRegistry.default()
         self._installed_extras = tuple(sorted(set(extras)))
         self._network = network
+        self._embed_runtime = embed_runtime if embed_runtime is not None else EmbedRuntime()
         self._reader = BoundedLineReader(
             reader,
             protocol.DEFAULT_MAX_FRAME_BYTES,
@@ -503,6 +506,7 @@ class Worker:
             progress=lambda completed, total: self._emit_progress(state, completed, total),
             checkpoint=lambda: self._checkpoint(state),
             sleep=lambda seconds: self._sleep(state, seconds),
+            embed_runtime=self._embed_runtime,
         )
         try:
             handler = OPERATION_HANDLERS[frame.operation]
@@ -685,6 +689,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         LOG.info("the network is disabled for this worker")
 
+    # The runtime of the recorded shape of `vision.embed` is OPT IN: the
+    # environment names it, and a worker that was not configured with it
+    # serves the simulated shape only. The refusal of the recorded shape
+    # names what is missing, so the log says it once, at the start.
+    embed_runtime = runtime_from_environment(os.environ)
+    if embed_runtime.available:
+        LOG.info("the recorded shape of vision.embed is served by this worker")
+    else:
+        LOG.info(
+            "the recorded shape of vision.embed is not served by this worker: %s",
+            embed_runtime.refusal(),
+        )
+
     try:
         signal.set_wakeup_fd(wake_write_fd)
         for signum in (signal.SIGTERM, signal.SIGINT):
@@ -700,6 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 wake_handler=_wake,
                 shutdown_event=shutdown_event,
                 network=network_mode(),
+                embed_runtime=embed_runtime,
             )
             try:
                 return worker.run()

@@ -16,6 +16,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from visionlens import protocol  # noqa: E402
+from visionlens.inference.service import EmbedRuntime  # noqa: E402
 from visionlens.worker import Worker  # noqa: E402
 
 WORKER_MODULE = "visionlens.worker"
@@ -71,7 +72,12 @@ def encode(obj: dict[str, Any]) -> bytes:
     return (json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8")
 
 
-def run_session(lines: Sequence[bytes], *, extras: Sequence[str] = ()) -> tuple[list[dict[str, Any]], bytes, int]:
+def run_session(
+    lines: Sequence[bytes],
+    *,
+    extras: Sequence[str] = (),
+    embed_runtime: EmbedRuntime | None = None,
+) -> tuple[list[dict[str, Any]], bytes, int]:
     """Drive a static script through an in-memory worker.
 
     Returns the parsed frames, the raw bytes and the exit code.
@@ -81,7 +87,12 @@ def run_session(lines: Sequence[bytes], *, extras: Sequence[str] = ()) -> tuple[
     )
     reader = io.BytesIO(payload)
     writer = io.BytesIO()
-    worker = Worker(reader=reader, writer=writer, extras=extras)
+    worker = Worker(
+        reader=reader,
+        writer=writer,
+        extras=extras,
+        embed_runtime=embed_runtime,
+    )
     code = worker.run()
     raw = writer.getvalue()
     frames = [json.loads(line) for line in raw.decode("utf-8").splitlines()]

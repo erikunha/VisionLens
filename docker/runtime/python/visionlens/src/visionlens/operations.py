@@ -4,17 +4,38 @@ Every operation is a pure function of its params plus the resolved model:
 no network, no weights, no wall-clock dependence in the results. Progress is
 reported through the context so the worker keeps the frame sequence rules,
 and the checkpoint callable stops the operation on cancel or deadline.
+
+The one exception is `vision.embed`, which serves TWO shapes. The SIMULATED
+shape is the one the deterministic runtime answers, and the golden transcript
+of the package pins it byte for byte. The RECORDED shape is the one the CPU
+adapter of the ticket produces: the vectors are on disk, and the line names
+the artifact. The shape a request asks for is named by its params, and a
+request that names BOTH is refused, because a request that claims two shapes
+asks for a run nobody can serve.
 """
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Mapping, Tuple
 
 from .encoder import DTYPE, digest_of, embed_bytes, preprocessing_fingerprint, unit_interval
-from .errors import ErrorCode, WorkerError
+from .errors import (
+    EmbeddingRunEmptyError,
+    ErrorCode,
+    LibraryError,
+    MissingExtraError,
+    ModelRunFailedError,
+    ResourceExhaustedError,
+    UnsupportedDeviceError,
+    WorkerError,
+)
+from .inference.embedder import EmbedAsset, EmbedRequest
+from .inference.service import EmbedRuntime, recorded_result
 from .registry import ModelRegistry, ModelSpec, UnknownModelError
+from .registry.loader import ModelNotFoundError, ModelRegistryError
 
 #: The frozen label set the simulated predictor draws from.
 LABELS: Tuple[str, ...] = ("label.bicycle", "label.boat", "label.cat", "label.dog", "label.plane")
@@ -50,6 +71,9 @@ class OperationContext:
     progress: Callable[[int, int], None]
     checkpoint: Callable[[], None]
     sleep: Callable[[float], None]
+    #: The runtime of the recorded shape of `vision.embed`, and the reason
+    #: it may be absent.
+    embed_runtime: EmbedRuntime = EmbedRuntime()
 
 
 def _string_param(params: Mapping[str, object], key: str) -> str:
@@ -83,6 +107,23 @@ def _resolve_model(ctx: OperationContext, model_id: str) -> ModelSpec:
             + "] to use it",
         )
     return spec
+
+
+def _device_param(params: Mapping[str, object]) -> str | None:
+    """The device the request asks for, or None when it asks for none."""
+    requested = params.get("device")
+    if requested is None:
+        return None
+    if not isinstance(requested, str):
+        raise WorkerError(ErrorCode.MALFORMED_FRAME, "params.device must be a string")
+    if requested not in ("cpu", "auto"):
+        raise WorkerError(
+            ErrorCode.UNSUPPORTED_PROTOCOL,
+            "device '"
+            + requested
+            + "' is not supported; this worker serves: cpu",
+        )
+    return requested
 
 
 def _embed_images(
@@ -125,6 +166,33 @@ def _embed_images(
 
 
 def run_embed(params: Mapping[str, object], ctx: OperationContext) -> dict[str, object]:
+    """vision.embed: the shape the request asks for.
+
+    The params name the shape: `images` asks for the SIMULATED one, and
+    `assets` asks for the RECORDED one. A request that names both claims
+    two shapes at once, and a request that names neither asks for nothing
+    the operation can serve: both are refused.
+    """
+    simulated = "images" in params
+    recorded = "assets" in params
+    if simulated and recorded:
+        raise WorkerError(
+            ErrorCode.MALFORMED_FRAME,
+            "the params of vision.embed carry both 'images' and 'assets', and a "
+            "request that names two shapes asks for a run nobody can serve",
+        )
+    if recorded:
+        return run_recorded_embed(params, ctx)
+    if simulated:
+        return run_simulated_embed(params, ctx)
+    raise WorkerError(
+        ErrorCode.MALFORMED_FRAME,
+        "the params of vision.embed carry neither 'images' nor 'assets', and the "
+        "operation serves the simulated shape and the recorded one",
+    )
+
+
+def run_simulated_embed(params: Mapping[str, object], ctx: OperationContext) -> dict[str, object]:
     """vision.embed: deterministic vectors derived from the ModelSpec."""
     model_id = _string_param(params, "model")
     images, vectors, spec = _embed_images(params, ctx, model_id)
@@ -145,6 +213,145 @@ def run_embed(params: Mapping[str, object], ctx: OperationContext) -> dict[str, 
         "preprocessingFingerprint": preprocessing_fingerprint(spec),
         "device": "cpu",
     }
+
+
+#: The fields one asset of a recorded run carries. A field the operation
+#: does not define is a refusal: the frame is read strictly, so a payload
+#: nobody agreed on cannot be interpreted.
+_ASSET_FIELDS: Tuple[str, ...] = ("assetId", "path")
+
+
+def _recorded_assets(params: Mapping[str, object]) -> Tuple[Tuple[EmbedAsset, ...], str]:
+    """The assets of a recorded run, and the snapshot it belongs to.
+
+    @raises WorkerError when the params do not describe the assets.
+    """
+    snapshot_id = _string_param(params, "snapshotId")
+    raw = params.get("assets")
+    if not isinstance(raw, list) or not raw:
+        raise WorkerError(
+            ErrorCode.MALFORMED_FRAME,
+            "params.assets must be a non-empty array of assets",
+        )
+    assets = []
+    for index, item in enumerate(raw):
+        where = "params.assets[" + str(index) + "]"
+        if not isinstance(item, dict):
+            raise WorkerError(ErrorCode.MALFORMED_FRAME, where + " must be an object")
+        for field in item:
+            if field not in _ASSET_FIELDS:
+                raise WorkerError(
+                    ErrorCode.MALFORMED_FRAME,
+                    where + " carries a field the operation does not define: " + field,
+                )
+        asset_id = item.get("assetId")
+        path = item.get("path")
+        if not isinstance(asset_id, str) or not asset_id:
+            raise WorkerError(
+                ErrorCode.MALFORMED_FRAME, where + ".assetId must be a non-empty string"
+            )
+        if not isinstance(path, str) or not path:
+            raise WorkerError(
+                ErrorCode.MALFORMED_FRAME, where + ".path must be a non-empty string"
+            )
+        assets.append(EmbedAsset(asset_id=asset_id, path=Path(path)))
+    return tuple(assets), snapshot_id
+
+
+def _wire_failure(failure: Exception) -> WorkerError:
+    """The wire refusal of a failure of the real runtime.
+
+    The wire vocabulary is FROZEN: the ten codes stay exactly the ten they
+    are, and a failure of the runtime is mapped onto the code that names
+    it. The mapping is written down here because a refusal whose code is a
+    guess is a refusal the caller cannot act on.
+
+    The MESSAGE of the refusal names the condition and never the path: the
+    logs and the traces of this platform record hashes and ids instead of
+    the local paths of the user
+    (`docs/vnext/19-SECURITY-PRIVACY-SUPPLY-CHAIN.md:16`).
+    """
+    if isinstance(failure, ModelNotFoundError):
+        return WorkerError(
+            ErrorCode.MALFORMED_FRAME,
+            "the params of vision.embed name a model the capability registry of "
+            "this worker does not carry",
+        )
+    if isinstance(failure, ModelRegistryError):
+        return WorkerError(
+            ErrorCode.WORKER_CRASHED,
+            "the capability registry of this worker cannot be read",
+        )
+    if isinstance(failure, MissingExtraError):
+        return WorkerError(
+            ErrorCode.MISSING_EXTRA,
+            "the model of this request needs the 'vision' extra, which this "
+            "environment does not have",
+        )
+    if isinstance(failure, UnsupportedDeviceError):
+        return WorkerError(
+            ErrorCode.UNSUPPORTED_PROTOCOL,
+            "the device of this request is not a device this build may run on",
+        )
+    if isinstance(failure, EmbeddingRunEmptyError):
+        return WorkerError(
+            ErrorCode.MALFORMED_FRAME,
+            "the run embedded nothing: every asset of the run was refused, and a "
+            "run that embedded nothing is not a run",
+        )
+    if isinstance(failure, ResourceExhaustedError):
+        return WorkerError(
+            ErrorCode.WORKER_CRASHED,
+            "the run exhausted the memory budget of the machine, after a bounded "
+            "back off",
+        )
+    if isinstance(failure, ModelRunFailedError):
+        return WorkerError(
+            ErrorCode.WORKER_CRASHED,
+            "the model refused the run, and the worker keeps serving",
+        )
+    if isinstance(failure, LibraryError):
+        return WorkerError(
+            ErrorCode.MALFORMED_FRAME,
+            "the runtime of the adapter refused this run",
+        )
+    return WorkerError(
+        ErrorCode.WORKER_CRASHED,
+        "the worker hit an unexpected internal error; see its stderr log",
+    )
+
+
+def run_recorded_embed(params: Mapping[str, object], ctx: OperationContext) -> dict[str, object]:
+    """vision.embed: the recorded shape, produced by the real adapter.
+
+    The vectors of the run are on disk and not in the line: the line names
+    the run id, the count, the dimension, the dtype, the digest of the
+    artifact and the error samples
+    (`docs/vnext/specs/VLN-005-python-cpu-vision-adapter.md:14`).
+    """
+    model_id = _string_param(params, "model")
+    assets, snapshot_id = _recorded_assets(params)
+    device = _device_param(params)
+    runtime = ctx.embed_runtime
+    service = runtime.service
+    if service is None:
+        raise WorkerError(ErrorCode.MALFORMED_FRAME, runtime.refusal())
+    request = EmbedRequest(snapshot_id=snapshot_id, assets=assets)
+    try:
+        result = service.embed(
+            model_id,
+            request,
+            device=device,
+            progress=ctx.progress,
+            checkpoint=ctx.checkpoint,
+        )
+    except WorkerError:
+        # A cancellation and a deadline keep their own code: they are not
+        # failures of the model and they are not mapped.
+        raise
+    except Exception as exc:
+        raise _wire_failure(exc) from None
+    return recorded_result(result)
 
 
 def run_predict(params: Mapping[str, object], ctx: OperationContext) -> dict[str, object]:
