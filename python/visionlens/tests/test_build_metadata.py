@@ -121,10 +121,12 @@ def test_the_training_extra_carries_the_estimator_stack(built_dist: Path) -> Non
 
 
 def test_the_aggregate_carries_every_capability_extra(built_dist: Path) -> None:
-    """`all` means all: the aggregate is every capability extra together.
+    """`all` is the aggregate of the extras that carry a stack.
 
-    An aggregate that left an extra out would be an install that a caller
-    believes is complete and that is not.
+    The `agents` and the `server` extras carry no package yet, so the
+    aggregate of the heavy stacks is the aggregate of everything a caller
+    installs with it. An aggregate that left a stack out would be an
+    install that a caller believes is complete and that is not.
     """
     metadata = _metadata(built_dist)
     requires = [
