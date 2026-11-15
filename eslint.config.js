@@ -174,6 +174,14 @@ export default [
               message: FACADE_BOUNDARY_MESSAGE,
             },
             {
+              group: ['../index.js', '../index'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
+              group: ['@vision-lens/core', '@vision-lens/core/*'],
+              message: FACADE_BOUNDARY_MESSAGE,
+            },
+            {
               group: ['../analyzer', '../analyzer.js', '../analyzer/*', '../analyzer/**'],
               message: FACADE_BOUNDARY_MESSAGE,
             },

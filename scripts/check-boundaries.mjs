@@ -98,6 +98,14 @@ const FACADE_VIOLATING_PATH = path.join(
   'facade',
   'facade-violating.ts',
 );
+const FACADE_BARREL_VIOLATING_PATH = path.join(
+  repoRoot,
+  'packages',
+  'core',
+  'src',
+  'facade',
+  'facade-barrel-violating.ts',
+);
 const FACADE_CLEAN_PATH = path.join(
   repoRoot,
   'packages',
@@ -135,6 +143,13 @@ const FACADE_VIOLATING = `import { DerivedArtifactsRepository } from '../store/r
 // store directly, because the store is the domain writer and the facade
 // only asks it to commit a row.
 export const artifacts = DerivedArtifactsRepository;
+`;
+
+const FACADE_BARREL_VIOLATING = `import { openMigratedStore } from '../index.js';
+// Deliberate facade boundary violation fixture: the barrel of the core
+// re-exports the store, so a facade that reaches the barrel reaches the
+// store too. The rule has to name the barrel as well.
+export const store = openMigratedStore;
 `;
 
 const FACADE_CLEAN = `import { createHash } from 'node:crypto';
@@ -239,6 +254,21 @@ try {
     );
   } else {
     console.log('ok: direct store access inside facade/ is rejected (no-restricted-imports)');
+  }
+
+  const facadeBarrelViolating = runEslint(FACADE_BARREL_VIOLATING, FACADE_BARREL_VIOLATING_PATH);
+  if (facadeBarrelViolating.status !== 1) {
+    failed = true;
+    console.error(
+      `FAIL: facade barrel violating fixture should exit 1 (the barrel of the core re-exports the store), got ${facadeBarrelViolating.status}\n${facadeBarrelViolating.stdout}${facadeBarrelViolating.stderr}`,
+    );
+  } else if (!facadeBarrelViolating.stdout.includes('no-restricted-imports')) {
+    failed = true;
+    console.error(
+      `FAIL: violation reported, but not by the facade boundary rule:\n${facadeBarrelViolating.stdout}`,
+    );
+  } else {
+    console.log('ok: the barrel of the core inside facade/ is rejected (no-restricted-imports)');
   }
 
   const facadeClean = runEslint(FACADE_CLEAN, FACADE_CLEAN_PATH);
